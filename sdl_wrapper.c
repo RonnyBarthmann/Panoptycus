@@ -39,6 +39,7 @@ static int buttonPressedFlag[3]  = { 0, 0, 0 };
 static int buttonReleasedFlag[3] = { 0, 0, 0 };
 
 static int firstKey    = 0;
+static int wheelDelta  = 0;   /* Mausrad seit dem letzten FlipBuffers() */
 
 /* ---------------------------------------------------------------- */
 /* Hilfsfunktionen                                                   */
@@ -112,8 +113,12 @@ int SDL_Wrapper_Init(int width, int height, const char *title)
         return 1;
     }
 
-    renderer = SDL_CreateRenderer(window, -1,
-                                   SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");   /* weiche Skalierung */
+    if (getenv("PANOPTYCUS_SOFTWARE"))   /* z.B. für Tests ohne GPU/Display */
+        renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
+    else
+        renderer = SDL_CreateRenderer(window, -1,
+                                       SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     if (!renderer) {
         SDL_DestroyWindow(window);
         window = NULL;
@@ -434,6 +439,7 @@ void FlipBuffers(void)
         buttonReleasedFlag[i] = 0;
     }
     firstKey  = 0;
+    wheelDelta = 0;
 
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
@@ -467,6 +473,10 @@ void FlipBuffers(void)
                 }
                 break;
             }
+
+            case SDL_MOUSEWHEEL:
+                wheelDelta += event.wheel.y;
+                break;
 
             case SDL_TEXTINPUT: {
                 if (firstKey == 0) {
@@ -569,4 +579,84 @@ int WindowHeight(void)
 int ShouldQuit(void)
 {
     return quitFlag;
+}
+
+/* ---------------------------------------------------------------- */
+/* Erweiterungen (UI)                                                 */
+/* ---------------------------------------------------------------- */
+
+void FillRect(int x, int y, int w, int h, int c)
+{
+    if (w <= 0 || h <= 0) return;
+    SDL_SetRenderDrawColor(renderer, (Uint8)Red(c), (Uint8)Green(c), (Uint8)Blue(c), (Uint8)(c & 0xFF));
+    SDL_Rect r = { x, y, w, h };
+    SDL_RenderFillRect(renderer, &r);
+}
+
+void DrawImageTint(int imageID, int x, int y, int width, int height, int c)
+{
+    SDL_Texture *tex = GetTexture(imageID);
+    if (!tex) return;
+    SDL_SetTextureColorMod(tex, (Uint8)Red(c), (Uint8)Green(c), (Uint8)Blue(c));
+    SDL_SetTextureAlphaMod(tex, (Uint8)(c & 0xFF));
+    SDL_Rect dst = { x, y, width, height };
+    SDL_RenderCopy(renderer, tex, NULL, &dst);
+    SDL_SetTextureColorMod(tex, 255, 255, 255);
+    SDL_SetTextureAlphaMod(tex, 255);
+}
+
+int GetMouseWheel(void)
+{
+    return wheelDelta;
+}
+
+int SaveScreenshot(const char *file)
+{
+    int w, h;
+    SDL_Texture *target = SDL_GetRenderTarget(renderer);
+    if (target) SDL_QueryTexture(target, NULL, NULL, &w, &h);
+    else SDL_GetRendererOutputSize(renderer, &w, &h);
+    SDL_Surface *surf = SDL_CreateRGBSurfaceWithFormat(0, w, h, 32, SDL_PIXELFORMAT_ARGB8888);
+    if (!surf) return 1;
+    int rc = SDL_RenderReadPixels(renderer, NULL, SDL_PIXELFORMAT_ARGB8888, surf->pixels, surf->pitch);
+    if (rc == 0) rc = SDL_SaveBMP(surf, file);
+    SDL_FreeSurface(surf);
+    return rc != 0;
+}
+
+void DrawImagePartTint(int imageID, int sx, int sy, int sw, int sh,
+                       int dx, int dy, int dw, int dh, int c)
+{
+    SDL_Texture *tex = GetTexture(imageID);
+    if (!tex) return;
+    SDL_SetTextureColorMod(tex, (Uint8)Red(c), (Uint8)Green(c), (Uint8)Blue(c));
+    SDL_SetTextureAlphaMod(tex, (Uint8)(c & 0xFF));
+    SDL_Rect src = { sx, sy, sw, sh };
+    SDL_Rect dst = { dx, dy, dw, dh };
+    SDL_RenderCopy(renderer, tex, &src, &dst);
+    SDL_SetTextureColorMod(tex, 255, 255, 255);
+    SDL_SetTextureAlphaMod(tex, 255);
+}
+
+void DrawLine(int x1, int y1, int x2, int y2, int c)
+{
+    SDL_SetRenderDrawColor(renderer, (Uint8)Red(c), (Uint8)Green(c), (Uint8)Blue(c), (Uint8)(c & 0xFF));
+    SDL_RenderDrawLine(renderer, x1, y1, x2, y2);
+}
+
+void DrawImageRotatedTint(int imageID, int x, int y, double angleDegree, double scale, int c)
+{
+    if (imageID <= 0 || imageID > imageCount) return;
+    SDL_Texture *tex = images[imageID - 1].tex;
+    if (!tex) return;
+    double angle = fmod(angleDegree, 360.0);
+    if (angle < 0.0) angle += 360.0;
+    int dstW = (int)(images[imageID - 1].w * scale);
+    int dstH = (int)(images[imageID - 1].h * scale);
+    SDL_Rect dst = { x - dstW / 2, y - dstH / 2, dstW, dstH };
+    SDL_SetTextureColorMod(tex, (Uint8)Red(c), (Uint8)Green(c), (Uint8)Blue(c));
+    SDL_SetTextureAlphaMod(tex, (Uint8)(c & 0xFF));
+    SDL_RenderCopyEx(renderer, tex, NULL, &dst, angle, NULL, SDL_FLIP_NONE);
+    SDL_SetTextureColorMod(tex, 255, 255, 255);
+    SDL_SetTextureAlphaMod(tex, 255);
 }

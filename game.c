@@ -4,1505 +4,117 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include <time.h>
 
-#define MAX_HEROES 8
-#define MAX_WAYPOINTS 128
-#define MAX_PROJECTILES 1024
+#include "core.h"
+
 #define DEBUG 1
-#define BIGFLOAT 9999999999999999.9
 #define CONFIG_FILE "game.conf"
+#define SAVE_FILE   "savegame.dat"
+#define SAVE_MAGIC  0x50414E32u   /* "PAN2" */
 
 #define MOUSEBUTTON_Left 1
 #define MOUSEBUTTON_Right 2
 #define MOUSEBUTTON_Middle 3
 #define MOUSEBUTTON_Any 0
 
-struct waypoint {
-    int x;
-    int y;
-};
+static int renderWidth;
+static int renderHeight;
 
-struct waypoint heroWaypoints[MAX_HEROES][MAX_WAYPOINTS];
-
-void InitWaypointsHero(int hero) {
-    for (int i=0; i<MAX_WAYPOINTS; i++) {
-        heroWaypoints[hero][i].x = 0;
-        heroWaypoints[hero][i].y = 0;
-    }
-}
-
-void InitWaypoints() {
-    for (int i=0; i<MAX_HEROES; i++) {
-        InitWaypointsHero(i);
-    }
-}
-
-int renderWidth;
-int renderHeight;
-double scale;
-int engineStep;
-
-struct projectileClass {
-    int valid;
-    int map;
-    int type;
-    int state;
-    double x;
-    double y;
-    double angle;
-    double speed;
-};
-
-struct projectileClass projectiles[MAX_PROJECTILES];
-
-#define CLASS_Knight 0
-#define CLASS_Mage 1
-#define CLASS_Archer 2
-
-struct heroClass {
-    int isHero;
-    int class;
-    int map;
-    int x;
-    //double xf;
-    int xTarget;
-    int y;
-    //double yf;
-    int yTarget;
-    int angle;
-    int mana;
-    int manaMax;
-    int health;
-    int healthMax;
-    int speed;
-    int autopilot;
-    int autopilotEnabled;
-    int waypoint;
-    int waypoints;
-    int walking;
-    double walkCycle;
-    int attacking;
-    double attackCycle;
-    int skill;
-    int skilling; // lol (more "use skill" ... but "walking" and "attacking" and yeah ... you get the point ...)
-    double skillCycle;
-    int skillSlots[4];
-    int potionSlots[3];
-    int potionState[3];
-    int GameCleared;
-    int GameLost;
-    int GameCooldown;
-};
-
-struct heroClass heroes[MAX_HEROES];
-
-#define PROJECTILE_Arcane 0
-#define PROJECTILE_Arrow 1
-
-void ClearProjectiles(int projectil) {
-    projectiles[projectil].valid = 0;
-    projectiles[projectil].map = 0;
-    projectiles[projectil].type = 0;
-    projectiles[projectil].state = 0;
-    projectiles[projectil].x = 0;
-    projectiles[projectil].y = 0;
-    projectiles[projectil].angle = 0;
-    projectiles[projectil].speed = 0;
-}
-
-void ClearHero(int hero) {
-    heroes[hero].isHero = 0;
-    heroes[hero].class = 0;
-    heroes[hero].map = 0;
-    heroes[hero].x = 0;
-    heroes[hero].y = 0;
-    heroes[hero].angle = 0;
-    heroes[hero].mana = 1;
-    heroes[hero].manaMax = 1;
-    heroes[hero].health = 1;
-    heroes[hero].healthMax = 1;
-    heroes[hero].speed = 1;
-    heroes[hero].autopilot = 0;
-    heroes[hero].autopilotEnabled = 0;
-    heroes[hero].waypoint = 0;
-    heroes[hero].waypoints = 0;
-    heroes[hero].walking = 0;
-    heroes[hero].walkCycle = 0;
-    heroes[hero].attacking = 0;
-    heroes[hero].attackCycle = 0;
-    heroes[hero].skill = 0;
-    heroes[hero].skilling = 0;
-    heroes[hero].skillCycle = 0;
-    heroes[hero].skillSlots[0] = 0;
-    heroes[hero].skillSlots[1] = 0;
-    heroes[hero].skillSlots[2] = 0;
-    heroes[hero].skillSlots[3] = 0;
-    heroes[hero].potionSlots[0] = 0;
-    heroes[hero].potionSlots[1] = 0;
-    heroes[hero].potionSlots[2] = 0;
-    heroes[hero].potionState[0] = 0;
-    heroes[hero].potionState[1] = 0;
-    heroes[hero].potionState[2] = 0;
-    heroes[hero].GameCleared = 0;
-    heroes[hero].GameLost = 0;
-    heroes[hero].GameCooldown = 300;
-    InitWaypointsHero(hero);
-}
-
+/* Die Module werden direkt eingebunden (wie schon maps.c vorher). */
+#include "ui.c"
 #include "maps.c"
+#include "data.c"
+#include "sim.c"
+#include "render.c"
+#include "screens.c"
 
-int MapRenderDistance;
+/* ================================================================== */
+/* Speichern / Laden                                                  */
+/* ================================================================== */
 
-void DrawImageScaled(int ImageID, double x, double y, double w, double h) {
-    DrawImage(ImageID,x*scale,y*scale,w*scale,h*scale);
+typedef struct { unsigned int magic; int stageCount; int heroSize, playerSize; } SaveHeader;
+
+static void SaveGame(void) {
+    FILE *f = fopen(SAVE_FILE, "wb");
+    if (!f) return;
+    SaveHeader h = { SAVE_MAGIC, StageCount, (int)sizeof heroes, (int)sizeof player };
+    fwrite(&h, sizeof h, 1, f);
+    fwrite(&player, sizeof player, 1, f);
+    fwrite(heroes, sizeof heroes, 1, f);
+    fclose(f);
 }
-void DrawImageRotatedScaled(int ImageID, double x, double y, double a, double s) {
-    DrawImageRotated(ImageID,x*scale,y*scale,a,s*scale);
-}
-void DrawBox_(int x, int y, int w, int h, int c) {
-    for (int y_=y;y_<(y+h);y_++) {
-        for (int x_=x;x_<(x+w);x_++) Plot(x_,y_,c);
+
+static int LoadGame(void) {
+    FILE *f = fopen(SAVE_FILE, "rb");
+    if (!f) return 0;
+    SaveHeader h;
+    int ok = fread(&h, sizeof h, 1, f) == 1 && h.magic == SAVE_MAGIC && h.stageCount == StageCount &&
+             h.heroSize == (int)sizeof heroes && h.playerSize == (int)sizeof player &&
+             fread(&player, sizeof player, 1, f) == 1 && fread(heroes, sizeof heroes, 1, f) == 1;
+    fclose(f);
+    if (!ok) return 0;
+    int stageOf[MAX_HEROES], partnerOf[MAX_HEROES];
+    for (int i = 0; i < MAX_HEROES; i++) { stageOf[i] = heroes[i].stage; partnerOf[i] = heroes[i].partner; heroes[i].inst = -1; heroes[i].stage = -1; heroes[i].partner = -1; }
+    for (int i = 0; i < MAX_HEROES; i++) {
+        if (!heroes[i].isHero || stageOf[i] < 0 || heroes[i].inst >= 0) continue;
+        int p = partnerOf[i];
+        if (p < 0 || !heroes[p].isHero || stageOf[p] != stageOf[i] || heroes[p].inst >= 0) p = -1;
+        double hp = heroes[i].hp; (void)hp;
+        StartStage(i, stageOf[i], p);
     }
-}
-void DrawBoxScaled(double x, double y, double w, double h, int c) {
-    DrawBox_(x*scale,y*scale,w*scale,h*scale,c);
-}
-    
-
-void InitMapCollision(int tile) {
-    if (MapTiles[tile].loaded != 0) {
-        int size = MapTiles[tile].width*MapTiles[tile].height;
-        
-        unsigned char *green = GetImageGreenChannel(MapTiles[tile].collision, &MapTiles[tile].width, &MapTiles[tile].height);
-        if (green == NULL) return;
-        
-        MapTiles[tile].collisionShadow = (char*)malloc(size);
-        if (MapTiles[tile].collisionShadow == NULL) return;
-        
-        
-        for (int x=0; x<MapTiles[tile].width; x++) {
-            for (int y=0; y<MapTiles[tile].height; y++) {
-                int collision = green[x + y * MapTiles[tile].width];
-                if (collision > 127) {
-                    MapTiles[tile].collisionShadow[x+y*MapTiles[tile].width] = 0;
-                } else {
-                    MapTiles[tile].collisionShadow[x+y*MapTiles[tile].width] = 1;
-                }
-            }
-        }
-        
-        free(green);
-    }
-}
-
-void LoadMapTile(int tile) {
-    MapTiles[tile].loaded = 1;
-    MapTiles[tile].map = LoadImage(MapTiles[tile].mapFilename);
-    MapTiles[tile].overlay = LoadImage(MapTiles[tile].overlayFilename);
-    MapTiles[tile].collision = LoadImage(MapTiles[tile].collisionFilename);
-    if (MapTiles[tile].collision != 0) InitMapCollision(tile);
-}
-
-void DrawOverlay(int xPos,int yPos) {
-    for (int i=0; i<MAX_TILES; i++) {
-        if (MapTiles[i].exist != 0) {
-            int tileNeeded = 1;
-            if (xPos < MapTiles[i].x-MapRenderDistance) tileNeeded = 0;
-            if (xPos > MapTiles[i].x+MapTiles[i].width+MapRenderDistance) tileNeeded = 0;
-            if (yPos < MapTiles[i].y-MapRenderDistance) tileNeeded = 0;
-            if (yPos > MapTiles[i].y+MapTiles[i].height+MapRenderDistance) tileNeeded = 0;
-            
-            if (tileNeeded!=0) {
-                if (MapTiles[i].loaded == 0) {
-                    LoadMapTile(i);
-                }
-                if (MapTiles[i].overlay > -1) {
-                    DrawImageScaled(MapTiles[i].overlay,MapTiles[i].x-xPos+960,MapTiles[i].y-yPos+540,MapTiles[i].width,MapTiles[i].height);
-                }
-            }
-        }
-    }
-}
-
-void DrawMap(int xPos,int yPos) {
-    for (int i=0; i<MAX_TILES; i++) {
-        if (MapTiles[i].exist != 0) {
-            int tileNeeded = 1;
-            if (xPos < MapTiles[i].x-MapRenderDistance) tileNeeded = 0;
-            if (xPos > MapTiles[i].x+MapTiles[i].width+MapRenderDistance) tileNeeded = 0;
-            if (yPos < MapTiles[i].y-MapRenderDistance) tileNeeded = 0;
-            if (yPos > MapTiles[i].y+MapTiles[i].height+MapRenderDistance) tileNeeded = 0;
-            
-            if (tileNeeded!=0) {
-                if (MapTiles[i].loaded == 0) {
-                    LoadMapTile(i);
-                }
-                if (MapTiles[i].map > -1) {
-                    DrawImageScaled(MapTiles[i].map,MapTiles[i].x-xPos+960,MapTiles[i].y-yPos+540,MapTiles[i].width,MapTiles[i].height);
-                }
-            }
-        }
-    }
-}
-
-int HeroCanvas[MAX_HEROES];
-int manageMode;
-int ActiveHeroSlots[4];
-int ActiveHero;
-
-// Texture_IDs
-int Texture_head;
-int Texture_leftHand;
-int Texture_rightHand;
-int Texture_leftWing1;
-int Texture_rightWing1;
-int CanvasBG;
-int HeroBG;
-int VoidBG;
-int Texture_Sword;
-int Texture_Staff;
-int Texture_Bow;
-int Texture_Arrow;
-int Texture_ArcArrow;
-int TargetIcon;
-int Texture_monsterHuman;
-int AutopilotOnIcon;
-int AutopilotOffIcon;
-int BarTexture;
-int LifeTexture;
-int ManaTexture;
-int ManagedModeIcon;
-int FullscreenIcon;
-int Font[256];
-int Texture_Skill_BG;
-int Texture_Skill_Q;
-int Texture_Skill_W;
-int Texture_Skill_E;
-int Texture_Skill_R;
-int Texture_Skill_Active;
-int Texture_Skill_5;
-int Texture_Skill_Circle;
-int Texture_Skill_Spray;
-int Texture_Skill_Shotgun;
-int Texture_Skill_None;
-int Texture_Potion_1;
-int Texture_Potion_2;
-int Texture_Potion_3;
-int Texture_Potion_BG;
-int Texture_Potion_None;
-int Texture_Potion_Empty;
-int Texture_Potion_Green[101];
-int Texture_Potion_Red[101];
-int Texture_Potion_Blue[101];
-int GameClearTex;
-int GameLostTex;
-
-#define M_PIMALDAUMEN 3.14159265358979323846
-
-double LookAt(double x, double y, double target_x, double target_y)
-{
-    double dx = target_x - x;
-    double dy = target_y - y;
-
-    double angle = atan2(dy, dx) * (180.0 / M_PIMALDAUMEN);
-    
-    angle += 90;
-
-    if (angle < 0.0) angle += 360.0;
-
-    return angle;
-}
-
-void rotate_point(double *x, double *y, double a) {
-    a = fmod(a, 360.0);
-    if (a < 0.0) a += 360.0;
-
-    double rad = a * (M_PIMALDAUMEN / 180.0);
-
-    double new_x = (*x) * cos(rad) - (*y) * sin(rad);
-    double new_y = (*x) * sin(rad) + (*y) * cos(rad);
-
-    *x = new_x;
-    *y = new_y;
-}
-
-int IsInside(int xPos, int yPos, int x, int y, int w, int h) {
-    if ( xPos > x ) {
-        if ( xPos < x+w ) {
-            if ( yPos > y ) {
-                if ( yPos < y+h ) {
-                    return 1;
-                }
-            }
-        }
-    }
-    return 0;
-}
-
-double ToPointDistance(double x1,double y1, double x2, double y2) {
-    double x = x2-x1;
-    double y = y2-y1;
-    double d = sqrt(x*x + y*y);
-    return d;
-}
-
-int CheckToPointDistance(double x1,double y1, double x2, double y2, double distance) {
-    double d = ToPointDistance(x1,y1,x2,y2);
-    return (d < distance);
-}
-
-int NearestWaypoint(int hero) {
-    double distance = (double)BIGFLOAT;
-    int waypoint = -1;
-    for (int i=0; i<heroes[hero].waypoints; i++) {
-        double nextDistance = ToPointDistance(heroes[hero].x,heroes[hero].y,heroWaypoints[hero][i].x,heroWaypoints[hero][i].y);
-        if (nextDistance < distance) {
-            distance = nextDistance;
-            waypoint = i;
-        }
-    }
-    return waypoint;
-}
-
-int HeroHasTarget(int hero, int range) {
-    return ( CheckToPointDistance(heroes[hero].x,heroes[hero].y,heroes[hero].xTarget,heroes[hero].yTarget,range) == 0 );
-}
-
-int getMapCollision(int xPos,int yPos) {
-    for (int i=0; i<MAX_TILES; i++) {
-        if (MapTiles[i].exist != 0) {
-            int tileNeeded = 1;
-            if (xPos < MapTiles[i].x) tileNeeded = 0;
-            if (xPos > MapTiles[i].x+MapTiles[i].width) tileNeeded = 0;
-            if (yPos < MapTiles[i].y) tileNeeded = 0;
-            if (yPos > MapTiles[i].y+MapTiles[i].height) tileNeeded = 0;
-            
-            if (tileNeeded!=0) {
-                if (MapTiles[i].loaded == 0) {
-                    LoadMapTile(i);
-                }
-                if (MapTiles[i].collisionShadow != NULL) {
-                    int x = xPos - MapTiles[i].x;
-                    int y = yPos - MapTiles[i].y;
-                    return MapTiles[i].collisionShadow[x+y*MapTiles[i].width];
-                }
-                return 0;
-            }
-        }
-    }
-    return 0;
-}
-
-int getMapCollisionBox(int x1,int y1,int x2, int y2) {
-    int collisions=0;
-    for (int y=y1; y<=y2; y++) {
-        for (int x=x1; x<=x2; x++) {
-            collisions+=getMapCollision(x,y);
-        }
-    }
-    return collisions;
-}
-
-int getMapCollisionBoxCenter(int x,int y,int r) {
-    return getMapCollisionBox(x-r,y-r,x+r,y+r);
-}
-
-void StartMap(int hero,int map);
-
-void HeroDies(int hero) {
-    // Hero lost Map
-    //StartMap(hero,heroes[hero].map);
-    if (heroes[hero].GameCleared == 0) heroes[hero].GameLost = 1;
-}
-
-void HeroGetsFlatDamage(int hero,int monster, double damage) {
-    int map = heroes[hero].map;
-    if (map > -1) {
-        if (monster > -1) {
-            if (monster < MAX_MONSTERS) {
-                heroes[hero].health -= damage;
-                if (heroes[hero].health < 1) {
-                    HeroDies(hero);
-                }
-            }
-        }
-    }
-}
-    
-void MonsterAttacksHero(int hero,int monster) {
-    int map = heroes[hero].map;
-    if (map > -1) {
-        if (monster > -1) {
-            if (monster < MAX_MONSTERS) {
-                if (mapdata[map].monsterExist[monster] != 0) {
-                    if (mapdata[map].monsterAlive[monster] != 0) {
-                        if (mapdata[map].monsterAttackCycle[monster] == 0) {
-                            HeroGetsFlatDamage(hero,monster,mapdata[map].monsterAttack[monster]);
-                            mapdata[map].monsterAttackCycle[monster] = 1;
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-void MonsterAttackDemon(int map, int monster) {
-    if (mapdata[map].monsterAttackCycle[monster] != 0) mapdata[map].monsterAttackCycle[monster]++;
-    if (mapdata[map].monsterAttackCycle[monster] > 30) mapdata[map].monsterAttackCycle[monster]=0;
-}
-
-void MonsterDeamon(int map, int monster) {
-    int hero = mapdata[map].hero;
-    MonsterAttackDemon(map,monster);
-    if (mapdata[map].monsterHealth[monster] < 1) {
-        mapdata[map].monsterAlive[monster] = 0;
-    }
-    if (mapdata[map].monsterAlive[monster] != 0) {
-        mapdata[map].monsterAngle[monster] = LookAt(mapdata[map].monsterX[monster],mapdata[map].monsterY[monster],heroes[hero].x,heroes[hero].y);
-        if (CheckToPointDistance(mapdata[map].monsterX[monster],mapdata[map].monsterY[monster],heroes[hero].x,heroes[hero].y,1000) != 0) {
-            if (CheckToPointDistance(mapdata[map].monsterX[monster],mapdata[map].monsterY[monster],heroes[hero].x,heroes[hero].y,20) != 0) {
-                MonsterAttacksHero(hero,monster);
-            } else {
-                double nextX = mapdata[map].monsterX[monster];
-                double nextY = mapdata[map].monsterY[monster];
-                double speed = ToPointDistance(mapdata[map].monsterX[monster],mapdata[map].monsterY[monster],heroes[hero].x,heroes[hero].y);
-                if (speed > MonsterSpeed(mapdata[map].monsterType[monster])) speed = MonsterSpeed(mapdata[map].monsterType[monster]);
-                nextX += sin(mapdata[map].monsterAngle[monster] / (180.0 / M_PIMALDAUMEN)) * speed;
-                nextY -= cos(mapdata[map].monsterAngle[monster] / (180.0 / M_PIMALDAUMEN)) * speed;
-                if (getMapCollisionBoxCenter(nextX,nextY,0) == 0) {
-                    mapdata[map].monsterX[monster] = nextX;
-                    mapdata[map].monsterY[monster] = nextY;
-                } else if (getMapCollisionBoxCenter(mapdata[map].monsterX[monster],nextY,0) == 0) {
-                    mapdata[map].monsterY[monster] = nextY;
-                } else if (getMapCollisionBoxCenter(nextX,mapdata[map].monsterY[monster],0) == 0) {
-                    mapdata[map].monsterX[monster] = nextX;
-                }
-            }
-        }
-    }
-}
-
-void MonstersDeamon(int map) {
-    for (int i=0; i<MAX_MONSTERS; i++) {
-        if (mapdata[map].monsterExist[i] != 0) {
-            if (mapdata[map].monsterAlive[i] != 0) {
-                MonsterDeamon(map,i);
-            }
-        }
-    }
-}
-
-void MapDeamon(int map) {
-    if (mapdata[map].hero != -1) {
-        MonstersDeamon(map);
-    }
-}
-
-int IsMonsterInside(int map, int monster, int x, int y, int size) {
-    if (mapdata[map].monsterX[monster] < (x+size)) {
-        if (mapdata[map].monsterX[monster] > (x-size)) {
-            if (mapdata[map].monsterY[monster] < (y+size)) {
-                if (mapdata[map].monsterY[monster] > (y-size)) {
-                    return 1;
-                }
-            }
-        }
-    }
-    return 0;
-}
-
-void MonsterGetsFlatDamage(int hero,int monster, double damage);
-
-void MonsterGetsArcaneDamage(int hero,int monster, double damage) {
-    MonsterGetsFlatDamage(hero,monster,damage);
-}
-
-void MonsterGetsPiercingDamage(int hero,int monster, double damage) {
-    MonsterGetsFlatDamage(hero,monster,damage);
-}
-
-void ProjectileDeamon(int projectil) {
-    if (projectiles[projectil].valid != 0) {
-        int map = projectiles[projectil].map;
-        int hero = mapdata[map].hero;
-        if (projectiles[projectil].type == PROJECTILE_Arcane) {
-            projectiles[projectil].x += sin(projectiles[projectil].angle / (180.0 / M_PIMALDAUMEN)) * projectiles[projectil].speed;
-            projectiles[projectil].y -= cos(projectiles[projectil].angle / (180.0 / M_PIMALDAUMEN)) * projectiles[projectil].speed;
-            for (int monster=0; monster<MAX_MONSTERS; monster++) {
-                if (projectiles[projectil].valid != 0) {
-                    if (mapdata[map].monsterExist[monster]) {
-                        if (mapdata[map].monsterAlive[monster]) {
-                            if (IsMonsterInside(map,monster,projectiles[projectil].x,projectiles[projectil].y,32) != 0) {
-                                MonsterGetsArcaneDamage(hero,monster,200);
-                                projectiles[projectil].valid = 0;
-                            }
-                        }
-                    }
-                }
-            }
-            if (getMapCollision(projectiles[projectil].x,projectiles[projectil].y) != 0) projectiles[projectil].valid = 0;
-        }
-        if (projectiles[projectil].type == PROJECTILE_Arrow) {
-            projectiles[projectil].x += sin(projectiles[projectil].angle / (180.0 / M_PIMALDAUMEN)) * projectiles[projectil].speed;
-            projectiles[projectil].y -= cos(projectiles[projectil].angle / (180.0 / M_PIMALDAUMEN)) * projectiles[projectil].speed;
-            for (int monster=0; monster<MAX_MONSTERS; monster++) {
-                if (projectiles[projectil].valid != 0) {
-                    if (mapdata[map].monsterExist[monster]) {
-                        if (mapdata[map].monsterAlive[monster]) {
-                            if (IsMonsterInside(map,monster,projectiles[projectil].x,projectiles[projectil].y,32) != 0) {
-                                MonsterGetsPiercingDamage(hero,monster,100);
-                                projectiles[projectil].valid = 0;
-                            }
-                        }
-                    }
-                }
-            }
-            if (getMapCollision(projectiles[projectil].x,projectiles[projectil].y) != 0) projectiles[projectil].valid = 0;
-        }
-    }
-                
-}
-
-int CheckHeroAtWaypoint(int hero,int waypoint) {
-    return CheckToPointDistance(heroes[hero].x,heroes[hero].y,heroWaypoints[hero][waypoint].x,heroWaypoints[hero][waypoint].y,(double)heroes[hero].speed*1.1);
-}
-
-double HeroMonsterDistance(int hero, int monster) {
-    int map = heroes[hero].map;
-    if (map > -1) {
-        if (monster > -1) {
-            if (monster < MAX_MONSTERS) {
-                return ToPointDistance(heroes[hero].x,heroes[hero].y,mapdata[map].monsterX[monster],mapdata[map].monsterY[monster]);
-            }
-        }
-    }
-    return BIGFLOAT;
-}
-
-int HeroNearestMonster(int hero) {
-    double distance = (double)BIGFLOAT;
-    int monster = -1;
-    int map = heroes[hero].map;
-    if (map > -1) {
-        for (int i=0; i<MAX_MONSTERS; i++) {
-            if (mapdata[map].monsterExist[i] != 0) {
-                if (mapdata[map].monsterAlive[i] != 0) {
-                    double nextDistance = HeroMonsterDistance(hero,i);
-                    if (nextDistance < distance) {
-                        distance = nextDistance;
-                        monster = i;
-                    }
-                }
-            }
-        }
-    }
-    return monster;
-}
-
-double HeroNearestMonsterDistance(int hero) {
-    int monster = HeroNearestMonster(hero);
-    return HeroMonsterDistance(hero,monster);
-}
-
-int IsAnyMonsterNearHero(int hero, double distance) {
-    return (HeroNearestMonsterDistance(hero) < distance);
-}
-
-int IsMonsterNearHero(int hero, int monster, double distance) {
-    return (HeroMonsterDistance(hero,monster) < distance);
-}
-
-void FillPotions(int hero);
-
-void MonsterDies(int hero,int monster) {
-    int map = heroes[hero].map;
-    if (map > -1) {
-        if (monster > -1) {
-            if (monster < MAX_MONSTERS) {
-                mapdata[map].monsterHealth[monster] = 0;
-                mapdata[map].monsterAlive[monster] = 0;
-                FillPotions(hero);
-                if (mapdata[map].monsterBoss[monster] != 0) {
-                    // Hero wins Map
-                    //StartMap(hero,heroes[hero].map);
-                    heroes[hero].GameCleared = 1;
-                    heroes[hero].GameLost = 0;
-                }
-            }
-        }
-    }
-}
-
-void MonsterGetsFlatDamage(int hero,int monster, double damage) {
-    int map = heroes[hero].map;
-    if (map > -1) {
-        if (monster > -1) {
-            if (monster < MAX_MONSTERS) {
-                mapdata[map].monsterHealth[monster] -= damage;
-                if (mapdata[map].monsterHealth[monster] < 1) {
-                    MonsterDies(hero,monster);
-                }
-            }
-        }
-    }
-}
-
-void SpawnProjectile(int map,double x,double y, double angle, int type, double speed) {
-    for (int i=0; i<MAX_PROJECTILES; i++) {
-        if (projectiles[i].valid == 0) {
-            projectiles[i].valid = 1;
-            projectiles[i].type = type;
-            projectiles[i].map = map;
-            projectiles[i].x = x;
-            projectiles[i].y = y;
-            projectiles[i].angle = angle;
-            projectiles[i].speed = speed;
-            return;
-        }
-    }
-}
-
-void KnightAttacksPoint(int hero,int x,int y) {
-    int valid = 1;
-    int map = heroes[hero].map;
-    for (int monster=0; monster<MAX_MONSTERS; monster++) {
-        if (valid != 0) {
-            if (mapdata[map].monsterExist[monster]) {
-                if (mapdata[map].monsterAlive[monster]) {
-                    if (IsMonsterInside(map,monster,x,y,32) != 0) {
-                        if (IsMonsterNearHero(hero,monster,100) != 0) {
-                            MonsterGetsFlatDamage(hero,monster,120);
-                            valid = 0;
-                        }
-                    }
-                }
-            }
-        }
-    }
-    heroes[hero].attackCycle = 0;
-    heroes[hero].attacking = 1;
-    heroes[hero].walking = 0;
-    heroes[hero].skilling = 0;
-}
-
-void KnightAttacksMonster(int hero,int monster) {
-    MonsterGetsFlatDamage(hero,monster,120);
-    heroes[hero].attackCycle = 0;
-    heroes[hero].attacking = 1;
-    heroes[hero].walking = 0;
-    heroes[hero].skilling = 0;
-}
-
-void MageAttacksPoint(int hero,int x,int y) {
-    if (heroes[hero].mana >= 1) {
-        SpawnProjectile(heroes[hero].map,heroes[hero].x,heroes[hero].y,LookAt(heroes[hero].x,heroes[hero].y,x,y),PROJECTILE_Arcane,10);
-        heroes[hero].mana -= 1;
-        heroes[hero].attackCycle = 0;
-        heroes[hero].attacking = 1;
-        heroes[hero].walking = 0;
-        heroes[hero].skilling = 0;
-    }
-}
-
-void MageAttacksMonster(int hero,int monster) {
-    if (heroes[hero].mana >= 1) {
-        SpawnProjectile(heroes[hero].map,heroes[hero].x,heroes[hero].y,LookAt(heroes[hero].x,heroes[hero].y,mapdata[heroes[hero].map].monsterX[monster],mapdata[heroes[hero].map].monsterY[monster]),PROJECTILE_Arcane,10);
-        heroes[hero].mana -= 1;
-        heroes[hero].attackCycle = 0;
-        heroes[hero].attacking = 1;
-        heroes[hero].walking = 0;
-        heroes[hero].skilling = 0;
-    }
-}
-
-void ArcherAttacksPoint(int hero,int x,int y) {
-    SpawnProjectile(heroes[hero].map,heroes[hero].x,heroes[hero].y,LookAt(heroes[hero].x,heroes[hero].y,x,y),PROJECTILE_Arrow,20);
-    heroes[hero].attackCycle = 0;
-    heroes[hero].attacking = 1;
-    heroes[hero].walking = 0;
-    heroes[hero].skilling = 0;
-}
-
-void ArcherAttacksMonster(int hero,int monster) {
-    SpawnProjectile(heroes[hero].map,heroes[hero].x,heroes[hero].y,LookAt(heroes[hero].x,heroes[hero].y,mapdata[heroes[hero].map].monsterX[monster],mapdata[heroes[hero].map].monsterY[monster]),PROJECTILE_Arrow,20);
-    heroes[hero].attackCycle = 0;
-    heroes[hero].attacking = 1;
-    heroes[hero].walking = 0;
-    heroes[hero].skilling = 0;
-}
-    
-void HeroAttacksPoint(int hero,int x,int y) {
-    if (heroes[hero].map > -1) {
-        if (heroes[hero].health > 0) {
-            if (heroes[hero].attacking == 0) {
-                if (heroes[hero].skilling == 0) {
-                    heroes[hero].angle = LookAt(heroes[hero].x,heroes[hero].y,x,y);
-                    if (heroes[hero].class == CLASS_Knight) KnightAttacksPoint(hero,x,y);
-                    if (heroes[hero].class == CLASS_Mage)   MageAttacksPoint(hero,x,y);
-                    if (heroes[hero].class == CLASS_Archer) ArcherAttacksPoint(hero,x,y);
-                }
-            }
-        }
-    }
-}
-    
-void HeroAttacksMonster(int hero,int monster) {
-    if (heroes[hero].map > -1) {
-        if (heroes[hero].health > 0) {
-            if (heroes[hero].attacking == 0) {
-                if (heroes[hero].skilling == 0) {
-                    heroes[hero].angle = LookAt(heroes[hero].x,heroes[hero].y,mapdata[heroes[hero].map].monsterX[monster],mapdata[heroes[hero].map].monsterY[monster]);
-                    if (heroes[hero].class == CLASS_Knight) KnightAttacksMonster(hero,monster);
-                    if (heroes[hero].class == CLASS_Mage)   MageAttacksMonster(hero,monster);
-                    if (heroes[hero].class == CLASS_Archer) ArcherAttacksMonster(hero,monster);
-                }
-            }
-        }
-    }
-}
-
-void HeroAttackDemon(int hero) {
-    heroes[hero].attackCycle++;
-    if (heroes[hero].class == CLASS_Knight) {
-        if (heroes[hero].attackCycle >= 12) {
-            heroes[hero].attackCycle = 0;
-            heroes[hero].attacking = 0;
-        }
-    }
-    if (heroes[hero].class == CLASS_Mage) {
-        if (heroes[hero].attackCycle >= 30) {
-            heroes[hero].attackCycle = 0;
-            heroes[hero].attacking = 0;
-        }
-    }
-    if (heroes[hero].class == CLASS_Archer) {
-        if (heroes[hero].attackCycle >= 30) {
-            heroes[hero].attackCycle = 0;
-            heroes[hero].attacking = 0;
-        }
-    }
-}
-
-#define SKILL_nil 0
-#define SKILL_Archer_Penta 1
-#define SKILL_Archer_Circle 2
-#define SKILL_Archer_Spray 3
-#define SKILL_Archer_Shotgun 4
-#define SKILL_Mage_Penta 5
-#define SKILL_Mage_Circle 6
-#define SKILL_Mage_Spray 7
-#define SKILL_Mage_Shotgun 8
-
-int SkillManaCost(int skill) {
-    if (skill == SKILL_Archer_Penta) return 10;
-    if (skill == SKILL_Archer_Circle) return 50;
-    if (skill == SKILL_Archer_Spray) return 2;
-    if (skill == SKILL_Archer_Shotgun) return 100;
-    if (skill == SKILL_Mage_Penta) return 10;
-    if (skill == SKILL_Mage_Circle) return 50;
-    if (skill == SKILL_Mage_Spray) return 2;
-    if (skill == SKILL_Mage_Shotgun) return 100;
-    return 0;
-}
-
-int SkillTime(int skill) {
-    if (skill == SKILL_Archer_Penta) return 30;
-    if (skill == SKILL_Archer_Circle) return 60;
-    if (skill == SKILL_Archer_Spray) return 1;
-    if (skill == SKILL_Archer_Shotgun) return 60;
-    if (skill == SKILL_Mage_Penta) return 30;
-    if (skill == SKILL_Mage_Circle) return 60;
-    if (skill == SKILL_Mage_Spray) return 1;
-    if (skill == SKILL_Mage_Shotgun) return 60;
-    return 0;
-}
-
-void HeroUseSkill(int hero,int skill) {
-    if (skill != 0) {
-        if (heroes[hero].attacking == 0) {
-            if (heroes[hero].skilling == 0) {
-                if (heroes[hero].health > 0) {
-                    if (heroes[hero].mana >= SkillManaCost(skill)) {
-                        heroes[hero].walking = 0;
-                        heroes[hero].walkCycle = 0;
-                        heroes[hero].skill = skill;
-                        heroes[hero].skilling = 1;
-                        heroes[hero].skillCycle = 0;
-                        heroes[hero].mana -= SkillManaCost(skill);
-                    }
-                }
-            }
-        }
-    }
-}
-
-void HeroSkillDemon(int hero) {
-    if (heroes[hero].health > 0) {
-        if (heroes[hero].skilling == 1) {
-            if (heroes[hero].skill == SKILL_Archer_Penta) {
-                if (heroes[hero].skillCycle == 0) {
-                    for (int i=-20; i<=20; i+=10) SpawnProjectile(heroes[hero].map,heroes[hero].x,heroes[hero].y,heroes[hero].angle+i,PROJECTILE_Arrow,20);
-                }
-            }
-            if (heroes[hero].skill == SKILL_Archer_Circle) {
-                if (heroes[hero].skillCycle == 0) {
-                    for (int i=0; i<=350; i+=10) SpawnProjectile(heroes[hero].map,heroes[hero].x,heroes[hero].y,heroes[hero].angle+i,PROJECTILE_Arrow,20);
-                }
-            }
-            if (heroes[hero].skill == SKILL_Archer_Spray) {
-                if (heroes[hero].skillCycle == 0) {
-                    SpawnProjectile(heroes[hero].map,heroes[hero].x,heroes[hero].y,heroes[hero].angle+((rand()%20)-10),PROJECTILE_Arrow,20);
-                }
-            }
-            if (heroes[hero].skill == SKILL_Archer_Shotgun) {
-                if (heroes[hero].skillCycle == 0) {
-                    for (int i=-24; i<=24; i+=1) SpawnProjectile(heroes[hero].map,heroes[hero].x,heroes[hero].y,heroes[hero].angle+i,PROJECTILE_Arrow,20);
-                }
-            }
-            if (heroes[hero].skill == SKILL_Mage_Penta) {
-                if (heroes[hero].skillCycle == 0) {
-                    for (int i=-20; i<=20; i+=10) SpawnProjectile(heroes[hero].map,heroes[hero].x,heroes[hero].y,heroes[hero].angle+i,PROJECTILE_Arcane,10);
-                }
-            }
-            if (heroes[hero].skill == SKILL_Mage_Circle) {
-                if (heroes[hero].skillCycle == 0) {
-                    for (int i=0; i<=350; i+=10) SpawnProjectile(heroes[hero].map,heroes[hero].x,heroes[hero].y,heroes[hero].angle+i,PROJECTILE_Arcane,10);
-                }
-            }
-            if (heroes[hero].skill == SKILL_Mage_Spray) {
-                    SpawnProjectile(heroes[hero].map,heroes[hero].x,heroes[hero].y,heroes[hero].angle+((rand()%20)-10),PROJECTILE_Arcane,10);
-                if (heroes[hero].skillCycle == 0) {
-                }
-            }
-            if (heroes[hero].skill == SKILL_Mage_Shotgun) {
-                if (heroes[hero].skillCycle == 0) {
-                    for (int i=-24; i<=24; i+=1) SpawnProjectile(heroes[hero].map,heroes[hero].x,heroes[hero].y,heroes[hero].angle+i,PROJECTILE_Arcane,10);
-                }
-            }
-            heroes[hero].skillCycle++;
-            if (heroes[hero].skillCycle >= SkillTime(heroes[hero].skill)) {
-                heroes[hero].skill = 0;
-                heroes[hero].skilling = 0;
-                heroes[hero].skillCycle = 0;
-            }
-        }
-    }
-}
-
-#define POTION_nil 0
-#define POTION_Health 1
-#define POTION_Mana 2
-
-void FillPotions(int hero) {
-    if (heroes[hero].health > 0) {
-        for (int i=0; i<3; i++) {
-            if (heroes[hero].potionSlots[i] == POTION_Health) heroes[hero].potionState[i] += 10;
-            if (heroes[hero].potionSlots[i] == POTION_Mana) heroes[hero].potionState[i] += 10;
-            if (heroes[hero].potionState[i] > 100) heroes[hero].potionState[i] = 100;
-        }
-    }
-}
-
-void HeroUsePotion(int hero,int potion) {
-    if (heroes[hero].health > 0) {
-        if (heroes[hero].potionSlots[potion] == POTION_Health) {
-            if (heroes[hero].potionState[potion] >= 10) {
-                heroes[hero].potionState[potion] -= 10;
-                heroes[hero].health += 500;
-                if (heroes[hero].health > heroes[hero].healthMax) heroes[hero].health = heroes[hero].healthMax;
-            }
-        }
-        if (heroes[hero].potionSlots[potion] == POTION_Mana) {
-            if (heroes[hero].potionState[potion] >= 10) {
-                heroes[hero].potionState[potion] -= 10;
-                heroes[hero].mana += 50;
-                if (heroes[hero].mana > heroes[hero].manaMax) heroes[hero].mana = heroes[hero].manaMax;
-            }
-        }
-    }
-}
-
-void HeroPotionUseDemon(int hero) {
-    if ( heroes[hero].autopilotEnabled != 0) {
-        if (heroes[hero].health > 0) {
-            for (int i=0; i<3; i++) {
-                if (heroes[hero].potionSlots[i] == POTION_Health) {
-                    if (heroes[hero].health*2 < heroes[hero].healthMax) HeroUsePotion(hero,i);
-                }
-                if (heroes[hero].potionSlots[i] == POTION_Mana) {
-                    if (heroes[hero].mana*2 < heroes[hero].manaMax) HeroUsePotion(hero,i);
-                }
-            }
-        }
-    }
-}
-
-void HeroDeamon(int hero) {
-    int attackDistance;
-    if (heroes[hero].isHero!=0) {
-        
-        if ( heroes[hero].health > 0) {
-        
-            HeroAttackDemon(hero);
-            HeroSkillDemon(hero);
-            
-            if ( heroes[hero].attacking == 0) {
-                
-                if ( heroes[hero].autopilot != 0) {
-                    if ( heroes[hero].waypoint < heroes[hero].waypoints) {
-                        if (CheckHeroAtWaypoint(hero,heroes[hero].waypoint) == 1) {
-                            if ( heroes[hero].waypoint < heroes[hero].waypoints-1) {
-                                heroes[hero].waypoint++;
-                            } else {
-                                heroes[hero].autopilot = 0;
-                            }
-                        }
-                    }
-                }
-                if ( heroes[hero].autopilot != 0) {
-                    heroes[hero].xTarget = heroWaypoints[hero][heroes[hero].waypoint].x;
-                    heroes[hero].yTarget = heroWaypoints[hero][heroes[hero].waypoint].y;
-                }
-                
-                heroes[hero].walking = HeroHasTarget(hero,10);
-                
-                if ( heroes[hero].autopilotEnabled != 0) {
-                    if (IsAnyMonsterNearHero(hero,500) != 0) {
-                        int monster = HeroNearestMonster(hero);
-                        if (monster > -1) {
-                            heroes[hero].xTarget = mapdata[heroes[hero].map].monsterX[monster];
-                            heroes[hero].yTarget = mapdata[heroes[hero].map].monsterY[monster];
-                            heroes[hero].angle = LookAt(heroes[hero].x,heroes[hero].y,heroes[hero].xTarget,heroes[hero].yTarget);
-                            heroes[hero].walking = 1;
-                        }
-                    }
-                }
-                
-                if ( heroes[hero].autopilotEnabled != 0) {
-                    attackDistance = 20;
-                    if (heroes[hero].class == CLASS_Knight) attackDistance = 20;
-                    if (heroes[hero].class == CLASS_Mage) attackDistance = 500;
-                    if (heroes[hero].class == CLASS_Archer) attackDistance = 500;
-                    if (IsAnyMonsterNearHero(hero,attackDistance) != 0) {
-                        int monster = HeroNearestMonster(hero);
-                        if (monster > -1) {
-                            heroes[hero].xTarget = mapdata[heroes[hero].map].monsterX[monster];
-                            heroes[hero].yTarget = mapdata[heroes[hero].map].monsterY[monster];
-                            heroes[hero].angle = LookAt(heroes[hero].x,heroes[hero].y,heroes[hero].xTarget,heroes[hero].yTarget);
-                            heroes[hero].walking = 0;
-                            HeroAttacksMonster(hero,monster);
-                        }
-                    }
-                }
-                
-                if (heroes[hero].walking!=0) {
-                    heroes[hero].angle = LookAt(heroes[hero].x,heroes[hero].y,heroes[hero].xTarget,heroes[hero].yTarget);
-                    double nextX = heroes[hero].x;
-                    double nextY = heroes[hero].y;
-                    double speed = ToPointDistance(heroes[hero].x,heroes[hero].y,heroes[hero].xTarget,heroes[hero].yTarget);
-                    if (speed > heroes[hero].speed) speed = heroes[hero].speed;
-                    nextX += sin(heroes[hero].angle / (180.0 / M_PIMALDAUMEN)) * speed;
-                    nextY -= cos(heroes[hero].angle / (180.0 / M_PIMALDAUMEN)) * speed;
-                    if (getMapCollisionBoxCenter(nextX,nextY,32) == 0) {
-                        heroes[hero].x = nextX;
-                        heroes[hero].y = nextY;
-                    } else if (getMapCollisionBoxCenter(heroes[hero].x,nextY,32) == 0) {
-                        heroes[hero].y = nextY;
-                    } else if (getMapCollisionBoxCenter(nextX,heroes[hero].y,32) == 0) {
-                        heroes[hero].x = nextX;
-                    }
-                }
-                
-                HeroPotionUseDemon(hero);
-                
-                if (heroes[hero].walking!=0) {
-                    heroes[hero].walkCycle++;
-                } else {
-                    heroes[hero].walkCycle=0;
-                }
-                
-                if (heroes[hero].mana < heroes[hero].manaMax) {
-                    if (engineStep%30 == 0) {
-                        heroes[hero].mana++;
-                    }
-                }
-                
-            }
-        }
-    }
-}
-
-void DisableAutopilot(int hero) {
-    heroes[hero].autopilot = 0;
-    heroes[hero].autopilotEnabled = 0;
-    heroes[hero].xTarget = heroes[hero].x;
-    heroes[hero].yTarget = heroes[hero].y;
-}
-
-void EnableAutopilot(int hero) {
-    heroes[hero].autopilot = 1;
-    heroes[hero].autopilotEnabled = 1;
-    heroes[hero].waypoint = NearestWaypoint(hero);
-}
-
-void DrawMonster(int monster, int map) {
-    if (mapdata[map].monsterExist[monster] != 0) {
-        if (mapdata[map].monsterAlive[monster] != 0) {
-            if (mapdata[map].monsterType[monster] == MONSTER_HUMAN) {
-                DrawImageRotatedScaled(Texture_monsterHuman,960+mapdata[map].monsterX[monster]-heroes[mapdata[map].hero].x,540+mapdata[map].monsterY[monster]-heroes[mapdata[map].hero].y,0,0.5f);
-            }
-            double life = mapdata[map].monsterHealth[monster];
-            life /= (double)mapdata[map].monsterHealthMax[monster];
-            if (mapdata[map].monsterBoss[monster] != 0) {
-                DrawImageScaled(BarTexture,810+mapdata[map].monsterX[monster]-heroes[mapdata[map].hero].x,400+mapdata[map].monsterY[monster]-heroes[mapdata[map].hero].y,300,50);
-                DrawImageScaled(LifeTexture,811+mapdata[map].monsterX[monster]-heroes[mapdata[map].hero].x,401+mapdata[map].monsterY[monster]-heroes[mapdata[map].hero].y,(double)298*life,48);
-            } else {
-                DrawImageScaled(BarTexture,920+mapdata[map].monsterX[monster]-heroes[mapdata[map].hero].x,480+mapdata[map].monsterY[monster]-heroes[mapdata[map].hero].y,80,15);
-                DrawImageScaled(LifeTexture,921+mapdata[map].monsterX[monster]-heroes[mapdata[map].hero].x,481+mapdata[map].monsterY[monster]-heroes[mapdata[map].hero].y,(double)78*life,13);
-            }
-    
-        }
-    }
-}
-
-void DrawProjectiles(int map) {
-    int hero = mapdata[map].hero;
-    for (int i=0; i<MAX_PROJECTILES; i++) {
-        if (projectiles[i].valid != 0) {
-            if (projectiles[i].map == map) {
-                if (projectiles[i].type == PROJECTILE_Arrow) DrawImageRotatedScaled(Texture_Arrow,960+projectiles[i].x-heroes[hero].x,540+projectiles[i].y-heroes[hero].y,projectiles[i].angle,0.5f);
-                if (projectiles[i].type == PROJECTILE_Arcane) DrawImageRotatedScaled(Texture_ArcArrow,960+projectiles[i].x-heroes[hero].x,540+projectiles[i].y-heroes[hero].y,projectiles[i].angle,0.5f);
-            }
-        }
-    }
-}
-
-void DrawMonsters(int map) {
-    for (int i=0; i<MAX_MONSTERS; i++) {
-        if (mapdata[map].monsterExist[i] != 0) {
-            DrawMonster(i,map);
-        }
-    }
-}
-
-void DrawValueFromValue(double x,double y,double scale,int value, int maxValue) {
-    if (value < 0) value = 0;
-    if (value > 1000000000) maxValue = 1000000000;
-    if (maxValue < 0) value = 0;
-    if (maxValue > 1000000000) maxValue = 1000000000;
-    DrawImageScaled(Font[47],x,y,scale/2,scale);
-    double xpos = 0;
-    int v;
-    if (value == 0) DrawImageScaled(Font['0'],x-scale/2,y,scale/2,scale);
-    while (value != 0) {
-        v = value%10;
-        value /= 10;
-        v+=48;
-        xpos -= scale/2;
-        DrawImageScaled(Font[v],x+xpos,y,scale/2,scale);
-    }
-    xpos = 0;
-    value = 1000000000;
-    int digits = 0;
-    while (value >= 10) {
-        value /= 10;
-        v = maxValue / value;
-        maxValue %= value;
-        if (v > 0) digits = 1;
-        if (digits != 0) {
-            v+=48;
-            xpos += scale/2;
-            DrawImageScaled(Font[v],x+xpos,y,scale/2,scale);
-        }
-    }
-}
-
-int SkillTexture(int skill) {
-    if (skill == SKILL_Archer_Penta) return Texture_Skill_5;
-    if (skill == SKILL_Archer_Circle) return Texture_Skill_Circle;
-    if (skill == SKILL_Archer_Spray) return Texture_Skill_Spray;
-    if (skill == SKILL_Archer_Shotgun) return Texture_Skill_Shotgun;
-    if (skill == SKILL_Mage_Penta) return Texture_Skill_5;
-    if (skill == SKILL_Mage_Circle) return Texture_Skill_Circle;
-    if (skill == SKILL_Mage_Spray) return Texture_Skill_Spray;
-    if (skill == SKILL_Mage_Shotgun) return Texture_Skill_Shotgun;
-    return Texture_Skill_None;
-}
-
-int PotionTexture(int potion,int state) {
-    if (state >= 0) {
-        if (state <= 100 ) {
-            if (potion == POTION_Health) return Texture_Potion_Red[state];
-            if (potion == POTION_Mana) return Texture_Potion_Blue[state];
-        }
-    }
-    return Texture_Potion_None;
-}
-
-void DrawHeroGUI(int hero) {
-    int pos_x1;
-    int pos_x2;
-    int pos_x3;
-    int pos_x4;
-    int pox_y;
-    int size;
-        
-    if (heroes[hero].autopilotEnabled != 0) {
-        DrawImageScaled(AutopilotOnIcon,1820,20,80,80);
-    } else {
-        DrawImageScaled(AutopilotOffIcon,1820,20,80,80);
-    }
-    
-    if (manageMode == 0) {
-        DrawImageScaled(ManagedModeIcon,1720,20,80,80);
-    }
-    
-    if (manageMode == 0) {
-        pos_x1 = 770;
-        pos_x2 = 870;
-        pos_x3 = 970;
-        pos_x4 = 1070;
-        pox_y = 980;
-        size = 80;
-    } else {
-        pos_x1 = 580;
-        pos_x2 = 780;
-        pos_x3 = 980;
-        pos_x4 = 1180;
-        pox_y = 900;
-        size = 160;
-    }
-    DrawImageScaled(Texture_Skill_BG,pos_x1,pox_y,size,size);
-    DrawImageScaled(Texture_Skill_BG,pos_x2,pox_y,size,size);
-    DrawImageScaled(Texture_Skill_BG,pos_x3,pox_y,size,size);
-    DrawImageScaled(Texture_Skill_BG,pos_x4,pox_y,size,size);
-    DrawImageScaled(SkillTexture(heroes[hero].skillSlots[0]),pos_x1,pox_y,size,size);
-    DrawImageScaled(SkillTexture(heroes[hero].skillSlots[1]),pos_x2,pox_y,size,size);
-    DrawImageScaled(SkillTexture(heroes[hero].skillSlots[2]),pos_x3,pox_y,size,size);
-    DrawImageScaled(SkillTexture(heroes[hero].skillSlots[3]),pos_x4,pox_y,size,size);
-    if (heroes[hero].skill != 0) {
-        if (heroes[hero].skill == heroes[hero].skillSlots[0]) DrawImageScaled(Texture_Skill_Active,pos_x1,pox_y,size,size);
-        if (heroes[hero].skill == heroes[hero].skillSlots[1]) DrawImageScaled(Texture_Skill_Active,pos_x2,pox_y,size,size);
-        if (heroes[hero].skill == heroes[hero].skillSlots[2]) DrawImageScaled(Texture_Skill_Active,pos_x3,pox_y,size,size);
-        if (heroes[hero].skill == heroes[hero].skillSlots[3]) DrawImageScaled(Texture_Skill_Active,pos_x4,pox_y,size,size);
-    }
-    DrawImageScaled(Texture_Skill_Q,pos_x1,pox_y,size,size);
-    DrawImageScaled(Texture_Skill_W,pos_x2,pox_y,size,size);
-    DrawImageScaled(Texture_Skill_E,pos_x3,pox_y,size,size);
-    DrawImageScaled(Texture_Skill_R,pos_x4,pox_y,size,size);
-    
-    if (manageMode == 0) {
-        pos_x1 = 1520;
-        pos_x2 = 1620;
-        pos_x3 = 1720;
-        pox_y = 980;
-        size = 80;
-    } else {
-        pos_x1 = 1380;
-        pos_x2 = 1560;
-        pos_x3 = 1740;
-        pox_y = 900;
-        size = 160;
-    }
-    DrawImageScaled(Texture_Potion_BG,pos_x1,pox_y,size,size);
-    DrawImageScaled(Texture_Potion_BG,pos_x2,pox_y,size,size);
-    DrawImageScaled(Texture_Potion_BG,pos_x3,pox_y,size,size);
-    DrawImageScaled(PotionTexture(heroes[hero].potionSlots[0],heroes[hero].potionState[0]),pos_x1,pox_y,size,size);
-    DrawImageScaled(PotionTexture(heroes[hero].potionSlots[1],heroes[hero].potionState[1]),pos_x2,pox_y,size,size);
-    DrawImageScaled(PotionTexture(heroes[hero].potionSlots[2],heroes[hero].potionState[2]),pos_x3,pox_y,size,size);
-    DrawImageScaled(Texture_Potion_1,pos_x1,pox_y,size,size);
-    DrawImageScaled(Texture_Potion_2,pos_x2,pox_y,size,size);
-    DrawImageScaled(Texture_Potion_3,pos_x3,pox_y,size,size);
-    
-    
-    DrawImageScaled(BarTexture,20,20,320,150);
-    double life = heroes[hero].health;
-    life /= (double)heroes[hero].healthMax;
-    double mana = heroes[hero].mana;
-    mana /= (double)heroes[hero].manaMax;
-    DrawImageScaled(LifeTexture,30,30,(double)300*life,60);
-    DrawImageScaled(ManaTexture,30,100,(double)300*mana,60);
-    DrawValueFromValue(170,40,40,heroes[hero].health,heroes[hero].healthMax);
-    DrawValueFromValue(170,110,40,heroes[hero].mana,heroes[hero].manaMax);
-}
-
-void DrawHeroWings(int hero) {
-    if (heroes[hero].walking!=0) {
-        
-        // Left Wing
-        double x = -20;
-        double y = 40;
-        
-        double a = heroes[hero].angle-sin(heroes[hero].walkCycle/10)*10;
-        
-        rotate_point(&x,&y,heroes[hero].angle);
-        DrawImageRotatedScaled(Texture_leftWing1,960+x,540+y,a,0.5f);
-        
-        // Right Wing
-        x = 20;
-        y = 40;
-        
-        a = heroes[hero].angle+sin(heroes[hero].walkCycle/10)*10;
-        
-        rotate_point(&x,&y,heroes[hero].angle);
-        DrawImageRotatedScaled(Texture_rightWing1,960+x,540+y,a,0.5f);
-    }
-    if (heroes[hero].walking==0) {
-        
-        // Left Wing
-        double x = -20;
-        double y = 40;
-        
-        double a = heroes[hero].angle;
-        
-        rotate_point(&x,&y,a);
-        DrawImageRotatedScaled(Texture_leftWing1,960+x,540+y,a,0.5f);
-        
-        // Right Wing
-        x = 20;
-        y = 40;
-        
-        a = heroes[hero].angle;
-        
-        rotate_point(&x,&y,a);
-        DrawImageRotatedScaled(Texture_rightWing1,960+x,540+y,a,0.5f);
-    }
-}
-
-void DrawHeroHands(int hero) {
-    int standing = 1;
-    if (heroes[hero].walking!=0) {
-        standing = 0;
-        
-        // Left Hand
-        double x = -40;
-        double y = 0;
-        
-        x += sin(heroes[hero].walkCycle/10)*8;
-        y -= sin(heroes[hero].walkCycle/10)*8;
-        double a = heroes[hero].angle-sin(heroes[hero].walkCycle/10)*10;
-        
-        rotate_point(&x,&y,heroes[hero].angle);
-        DrawImageRotatedScaled(Texture_leftHand,960+x,540+y,a,0.5f);
-        
-        // Right Hand
-        x = 40;
-        y = 0;
-        
-        x += sin(heroes[hero].walkCycle/10)*8;
-        y += sin(heroes[hero].walkCycle/10)*8;
-        a = heroes[hero].angle-sin(heroes[hero].walkCycle/10)*10;
-        
-        rotate_point(&x,&y,heroes[hero].angle);
-        if (heroes[hero].class == CLASS_Knight) DrawImageRotatedScaled(Texture_Sword,960+x,540+y,a,0.5f);
-        if (heroes[hero].class == CLASS_Mage) DrawImageRotatedScaled(Texture_Staff,960+x,540+y,a,0.5f);
-        if (heroes[hero].class == CLASS_Archer) DrawImageRotatedScaled(Texture_Bow,960+x,540+y,a,0.5f);
-        DrawImageRotatedScaled(Texture_rightHand,960+x,540+y,a,0.5f);
-    }
-    if (heroes[hero].attacking!=0) {
-        // standing = 0;
-        // placeholder "standing" right now
-    }
-    if (heroes[hero].skilling!=0) {
-        // standing = 0;
-        // placeholder "standing" right now
-    }
-    if (standing!=0) {
-        
-        // Left Hand
-        double x = -40;
-        double y = 0;
-        double a = heroes[hero].angle;
-        
-        rotate_point(&x,&y,a);
-        DrawImageRotatedScaled(Texture_leftHand,960+x,540+y,a,0.5f);
-        
-        // Right Hand
-        x = 40;
-        y = 0;
-        a = heroes[hero].angle;
-        
-        rotate_point(&x,&y,a);
-        if (heroes[hero].class == CLASS_Knight) DrawImageRotatedScaled(Texture_Sword,960+x,540+y,a,0.5f);
-        if (heroes[hero].class == CLASS_Mage) DrawImageRotatedScaled(Texture_Staff,960+x,540+y,a,0.5f);
-        if (heroes[hero].class == CLASS_Archer) DrawImageRotatedScaled(Texture_Bow,960+x,540+y,a,0.5f);
-        DrawImageRotatedScaled(Texture_rightHand,960+x,540+y,a,0.5f);
-    }
-}
-
-void DrawHero(int canvas, int hero) {
-    DrawOutput(canvas);
-    DrawMap(heroes[hero].x,heroes[hero].y);
-    if (heroes[hero].walking!=0) {
-        if (heroes[hero].autopilotEnabled==0) {
-            DrawImageScaled(TargetIcon,960+heroes[hero].xTarget-heroes[hero].x-32,540+heroes[hero].yTarget-heroes[hero].y-32,64,64);
-        }
-    }
-    DrawImageRotatedScaled(Texture_head,960,540,heroes[hero].angle,0.5f);
-    DrawHeroHands(hero);
-    DrawHeroWings(hero);
-    DrawMonsters(heroes[hero].map);
-    DrawProjectiles(heroes[hero].map);
-    DrawOverlay(heroes[hero].x,heroes[hero].y);
-    
-    
-    DrawImageScaled(BarTexture,900,440,120,30);
-    double life = heroes[hero].health;
-    life /= (double)heroes[hero].healthMax;
-    double mana = heroes[hero].mana;
-    mana /= (double)heroes[hero].manaMax;
-    DrawImageScaled(LifeTexture,901,441,(double)118*life,18);
-    DrawImageScaled(ManaTexture,901,461,(double)118*mana,8);
-    
-    DrawHeroGUI(hero);
-    
-    if (heroes[hero].GameCleared != 0) DrawImageScaled(GameClearTex,0,0,1920,1080);
-    if (heroes[hero].GameLost != 0) DrawImageScaled(GameLostTex,0,0,1920,1080);
-}
-
-void InitProjectils() {
-    for (int i = 0; i < MAX_PROJECTILES; i++) 
-        ClearProjectiles(i);
-}
-
-void InitHeroes() {
-    for (int i = 0; i < MAX_HEROES; i++) 
-        ClearHero(i);
-}
-
-void HeroLeftClickCallback(int hero, int x, int y) {
-    heroes[hero].xTarget = x;
-    heroes[hero].yTarget = y;
-}
-
-void HeroRightClickCallback(int hero, int x, int y) {
-    // right now only for debug and "fun to play"
-    HeroAttacksPoint(hero,x,y);
-}
-
-void HeroClickCallback(int hero, int x, int y) {
-    if ( IsInside(x,y,1720,20,80,80) != 0) {
-        if ( GetMousePressed(MOUSEBUTTON_Left)!=0 ) {
-            manageMode = 1;
-        }
-        return;
-    }
-    if ( IsInside(x,y,1820,20,80,80) != 0) {
-        if ( GetMousePressed(MOUSEBUTTON_Left)!=0 ) {
-            if (heroes[hero].autopilotEnabled != 0) {
-                DisableAutopilot(hero);
-            } else {
-                EnableAutopilot(hero);
-            }
-        }
-        return;
-    }
-    if (GetMouseIsPressed(MOUSEBUTTON_Left)!=0) HeroLeftClickCallback(hero,heroes[hero].x + (x-960),heroes[hero].y + (y-540));
-    if (GetMouseIsPressed(MOUSEBUTTON_Right)!=0) HeroRightClickCallback(hero,heroes[hero].x + (x-960),heroes[hero].y + (y-540));
-}
-
-void ClickCallback(int x, int y) {
-    if (manageMode!=0) {
-        if ( GetMousePressed(MOUSEBUTTON_Left)!=0 ) {
-            if ( IsInside(x,y,238,130,712,400) != 0) {
-                ActiveHero = ActiveHeroSlots[0];
-                manageMode = 0;
-            }
-            if ( IsInside(x,y,970,130,712,400) != 0) {
-                ActiveHero = ActiveHeroSlots[1];
-                manageMode = 0;
-            }
-            if ( IsInside(x,y,238,550,712,400) != 0) {
-                ActiveHero = ActiveHeroSlots[2];
-                manageMode = 0;
-            }
-            if ( IsInside(x,y,970,550,712,400) != 0) {
-                ActiveHero = ActiveHeroSlots[3];
-                manageMode = 0;
-            }
-        }
-    } else {
-        HeroClickCallback(ActiveHero,x,y);
-    }
-}
-
-void StartMap(int hero,int map) {
-    InitMapInfo(hero,map);
-    heroes[hero].x = mapdata[map].startx;
-    heroes[hero].xTarget = mapdata[map].startx;
-    heroes[hero].y = mapdata[map].starty;
-    heroes[hero].yTarget = mapdata[map].starty;
-    heroes[hero].angle = 0;
-    heroes[hero].map = map;
-    heroes[hero].mana = heroes[hero].manaMax;
-    heroes[hero].health = heroes[hero].healthMax;
-    mapdata[map].hero = hero;
-    heroes[hero].angle = mapdata[map].angle;
-    heroes[hero].autopilot = heroes[hero].autopilotEnabled;
-    InitMapWaypoints(hero,map);
-    heroes[hero].waypoint = 0;
-    heroes[hero].walking = 0;
-    heroes[hero].attacking = 0;
-    heroes[hero].skilling = 0;
-    heroes[hero].potionState[0] = 100;
-    heroes[hero].potionState[1] = 100;
-    heroes[hero].potionState[2] = 100;
-    heroes[hero].GameCleared = 0;
-    heroes[hero].GameLost = 0;
-    heroes[hero].GameCooldown = 300;
-}
-
-int LoadFont() {
-    for (int i=0; i<256; i++) {
-        Font[i] = LoadImage("assets/font/255.png");
-    }
-    Font[0] = LoadImage("assets/font/0.png");
-    Font[47] = LoadImage("assets/font/47.png"); // /
-    Font[48] = LoadImage("assets/font/48.png"); // 0
-    Font[49] = LoadImage("assets/font/49.png"); // 1
-    Font[50] = LoadImage("assets/font/50.png"); // 2
-    Font[51] = LoadImage("assets/font/51.png"); // 3
-    Font[52] = LoadImage("assets/font/52.png"); // 4
-    Font[53] = LoadImage("assets/font/53.png"); // 5
-    Font[54] = LoadImage("assets/font/54.png"); // 6
-    Font[55] = LoadImage("assets/font/55.png"); // 7
-    Font[56] = LoadImage("assets/font/56.png"); // 8
-    Font[57] = LoadImage("assets/font/57.png"); // 9
-    for (int i=0; i<256; i++) {
-        if (Font[i] == 0) return 0;
-    }
+    for (int i = 0; i < MAX_HEROES; i++) if (heroes[i].isHero) RecalcHero(i);
     return 1;
 }
 
-void InitSettings(void) {
-    renderHeight      = 1080;
-    MapRenderDistance = 1024;
+static void NewGame(void) {
+    memset(&player, 0, sizeof player);
+    for (int i = 0; i < MAX_HEROES; i++) { memset(&instances[i], 0, sizeof instances[i]); ClearHero(i); }
+    player.level = 1; player.gold = 150;
+    for (int l = 0; l < LAYOUT_COUNT; l++) for (int c = 0; c < 4; c++) player.layouts[l][c] = -1;
+    Item m;
+    for (int k = 0; k < MAT_COUNT; k++) { m = ItemMakeMaterial(TIER_NORMAL, k, 20); InvAdd(&m); }
+    ShopRestock();
+    int h = CreateHero(CLASS_Knight);
+    StartStage(h, 0, -1);
+    player.layouts[0][0] = h;
+}
 
+/* Gruppiert Helden ohne Platz in der aktuellen Anordnung automatisch ein */
+static void SyncLayouts(void) {
+    int *lay = player.layouts[0];
+    for (int c = 0; c < 4; c++) if (lay[c] >= 0 && !heroes[lay[c]].isHero) lay[c] = -1;
+    for (int h = 0; h < MAX_HEROES; h++) {
+        if (!heroes[h].isHero) continue;
+        int shown = 0; for (int c = 0; c < 4; c++) if (lay[c] == h) shown = 1;
+        if (shown) continue;
+        for (int c = 0; c < 4; c++) if (lay[c] < 0) { lay[c] = h; break; }
+    }
+}
+
+/* ================================================================== */
+/* Einstellungen                                                      */
+/* ================================================================== */
+
+static void InitSettings(void) {
+    renderHeight = 1080;
+    MapRenderDistance = 1024;
     FILE *f = fopen(CONFIG_FILE, "r");
     if (!f) return;
-
-    struct {
-        const char *key;
-        int        *target;
-    } settings[] = {
-        { "renderHeight",     &renderHeight },
-        { "renderDistance",   &MapRenderDistance },
-    //  { "Setting",          &Variable},
+    struct { const char *key; int *target; } settings[] = {
+        { "renderHeight", &renderHeight }, { "renderDistance", &MapRenderDistance },
     };
-    const size_t n = sizeof(settings) / sizeof(settings[0]);
-
     char line[256];
-    while (fgets(line, sizeof(line), f)) {
+    while (fgets(line, sizeof line, f)) {
         char *p = line;
         while (*p == ' ' || *p == '\t') p++;
-        for (size_t i = 0; i < n; i++) {
-            size_t keylen = strlen(settings[i].key);
-            if (strncmp(p, settings[i].key, keylen) == 0) {
-                p += keylen;
+        for (size_t i = 0; i < sizeof settings / sizeof settings[0]; i++) {
+            size_t kl = strlen(settings[i].key);
+            if (strncmp(p, settings[i].key, kl) == 0) {
+                p += kl;
                 while (*p == ' ' || *p == '\t' || *p == '=') p++;
-                int value = 0;
-                if (sscanf(p, "%d", &value) == 1 && value > 0) *settings[i].target = value;
+                int v = 0;
+                if (sscanf(p, "%d", &v) == 1 && v > 0) *settings[i].target = v;
                 break;
             }
         }
@@ -1510,420 +122,154 @@ void InitSettings(void) {
     fclose(f);
 }
 
-#define POTION_FULL 72  // it imagesize of 256 ... if image is smaller/larger you need to map it to 0...255)
-#define POTION_EMPTY 198
+/* ================================================================== */
+/* Hauptschleife                                                      */
+/* ================================================================== */
 
-void GeneratePotionTextures() {
-    for (int i=0;i<100;i++) {
-        int line = POTION_EMPTY - ((i*(POTION_EMPTY-POTION_FULL))/100);
-        
-        //red bottle
-        Texture_Potion_Red[i] = CreateImage(256,256);
-        DrawOutput(Texture_Potion_Red[i]);
-        DrawImage(Texture_Potion_Red[100],0,0,256,256);
-        DrawBox_(0,0,256,line,RGBA(255,255,255,0));
-        DrawImage(Texture_Potion_Empty,0,0,256,256);
-        
-        //green bottle
-        Texture_Potion_Green[i] = CreateImage(256,256);
-        DrawOutput(Texture_Potion_Green[i]);
-        DrawImage(Texture_Potion_Green[100],0,0,256,256);
-        DrawBox_(0,0,256,line,RGBA(255,255,255,0));
-        DrawImage(Texture_Potion_Empty,0,0,256,256);
-        
-        //blue bottle
-        Texture_Potion_Blue[i] = CreateImage(256,256);
-        DrawOutput(Texture_Potion_Blue[i]);
-        DrawImage(Texture_Potion_Blue[100],0,0,256,256);
-        DrawBox_(0,0,256,line,RGBA(255,255,255,0));
-        DrawImage(Texture_Potion_Empty,0,0,256,256);
+static void HandleKey(int key, int *quit) {
+    if (key == 0) return;
+    Hero *A = heroes[activeHero].isHero ? &heroes[activeHero] : NULL;
+    if (key == 27) {                          /* ESC: erst zurück zum Raster, dann beenden */
+        if (screen == SCR_GRID) *quit = 1; else { screen = SCR_GRID; pickClass = 0; }
+        return;
     }
-}
-
-#define LOAD(var, path) \
-    do { if (((var) = LoadImage(path)) == 0) return 0; } while (0)
-
-int LoadTextures() {
-    
-    // weapons
-    
-    LOAD(Texture_Sword   ,"assets/sword.png");
-    LOAD(Texture_Staff   ,"assets/staff.png");
-    LOAD(Texture_Bow     ,"assets/bow.png");
-    LOAD(Texture_Arrow   ,"assets/arrow.png");
-    LOAD(Texture_ArcArrow,"assets/arc_arrow.png");
-    
-    // heros
-    
-    LOAD(Texture_head      ,"assets/head.png");
-    LOAD(Texture_leftHand  ,"assets/handL.png");
-    LOAD(Texture_rightHand ,"assets/handR.png");
-    LOAD(Texture_leftWing1 ,"assets/LeftWing1.png");
-    LOAD(Texture_rightWing1,"assets/RightWing1.png");
-    
-    // monsters
-    
-    LOAD(Texture_monsterHuman,"assets/monsters/human.png");
-    
-    // GUI
-    
-    LOAD(VoidBG          ,"assets/canvas.png");
-    LOAD(CanvasBG        ,"assets/bg.png");
-    LOAD(HeroBG          ,"assets/bgHero.png");
-    LOAD(TargetIcon      ,"assets/target.png");
-    LOAD(AutopilotOnIcon ,"assets/autopilot_on.png");
-    LOAD(AutopilotOffIcon,"assets/autopilot_off.png");
-    LOAD(BarTexture      ,"assets/bar.png");
-    LOAD(LifeTexture     ,"assets/life.png");
-    LOAD(ManaTexture     ,"assets/mana.png");
-    LOAD(ManagedModeIcon ,"assets/tiled.png");
-    LOAD(FullscreenIcon  ,"assets/fullscreen.png");
-    LOAD(GameClearTex    ,"assets/won.png");
-    LOAD(GameLostTex     ,"assets/lost.png");
-    
-    // Skills
-    
-    LOAD(Texture_Skill_Q      ,"assets/skill_Q.png");
-    LOAD(Texture_Skill_W      ,"assets/skill_W.png");
-    LOAD(Texture_Skill_E      ,"assets/skill_E.png");
-    LOAD(Texture_Skill_R      ,"assets/skill_R.png");
-    LOAD(Texture_Skill_5      ,"assets/skill_5.png");
-    LOAD(Texture_Skill_BG     ,"assets/skill_BG.png");
-    LOAD(Texture_Skill_Active ,"assets/skill_active.png");
-    LOAD(Texture_Skill_Spray  ,"assets/skill_spray.png");
-    LOAD(Texture_Skill_Circle ,"assets/skill_circle.png");
-    LOAD(Texture_Skill_Shotgun,"assets/skill_shotgun.png");
-    LOAD(Texture_Skill_None   ,"assets/skill_None.png");
-    
-    // Potions
-    
-    LOAD(Texture_Potion_1         ,"assets/potion_1.png");
-    LOAD(Texture_Potion_2         ,"assets/potion_2.png");
-    LOAD(Texture_Potion_3         ,"assets/potion_3.png");
-    LOAD(Texture_Potion_BG        ,"assets/potion_BG.png");
-    LOAD(Texture_Potion_None      ,"assets/potion_None.png");
-    LOAD(Texture_Potion_Empty     ,"assets/potion_empty.png");
-    LOAD(Texture_Potion_Green[100],"assets/potion_green.png");
-    LOAD(Texture_Potion_Red[100]  ,"assets/potion_red.png");
-    LOAD(Texture_Potion_Blue[100] ,"assets/potion_blue.png");
-    
-    GeneratePotionTextures();
-    
-    // Font
-    
-    if (LoadFont() == 0) return 0;
-    
-    return 1;
-}
-
-void TestGame() {
-    ActiveHeroSlots[0] = 0;
-    ActiveHeroSlots[1] = 1;
-    ActiveHeroSlots[2] = 2;
-    ActiveHeroSlots[3] = 3;
-    ActiveHero = 0;
-    heroes[0].isHero = 1;
-    heroes[0].class = CLASS_Knight;
-    heroes[0].speed = 10;
-    heroes[0].autopilotEnabled = 1;
-    heroes[0].healthMax = 1000;
-    heroes[0].manaMax = 100;
-    heroes[0].potionSlots[0] = POTION_Health;
-    heroes[0].potionSlots[1] = POTION_Mana;
-    heroes[0].potionSlots[2] = POTION_Mana;
-    heroes[1].isHero = 1;
-    heroes[1].class = CLASS_Knight;
-    heroes[1].speed = 10;
-    heroes[1].autopilotEnabled = 1;
-    heroes[1].healthMax = 1000;
-    heroes[1].manaMax = 100;
-    heroes[1].potionSlots[0] = POTION_Health;
-    heroes[1].potionSlots[1] = POTION_Mana;
-    heroes[1].potionSlots[2] = POTION_Mana;
-    heroes[2].isHero = 1;
-    heroes[2].class = CLASS_Archer;
-    heroes[2].speed = 10;
-    heroes[2].autopilotEnabled = 1;
-    heroes[2].healthMax = 1000;
-    heroes[2].manaMax = 100;
-    heroes[2].skillSlots[0] = 1;
-    heroes[2].skillSlots[1] = 2;
-    heroes[2].skillSlots[2] = 3;
-    heroes[2].skillSlots[3] = 4;
-    heroes[2].potionSlots[0] = POTION_Health;
-    heroes[2].potionSlots[1] = POTION_Mana;
-    heroes[2].potionSlots[2] = POTION_Mana;
-    heroes[3].isHero = 1;
-    heroes[3].class = CLASS_Mage;
-    heroes[3].speed = 10;
-    heroes[3].autopilotEnabled = 1;
-    heroes[3].healthMax = 1000;
-    heroes[3].manaMax = 100;
-    heroes[3].skillSlots[0] = 5;
-    heroes[3].skillSlots[1] = 6;
-    heroes[3].skillSlots[2] = 7;
-    heroes[3].skillSlots[3] = 8;
-    heroes[3].potionSlots[0] = POTION_Health;
-    heroes[3].potionSlots[1] = POTION_Mana;
-    heroes[3].potionSlots[2] = POTION_Mana;
-    
-    heroes[4].isHero = 1;
-    heroes[4].class = CLASS_Knight;
-    heroes[4].speed = 50;
-    heroes[4].autopilotEnabled = 1;
-    heroes[4].healthMax = 1000;
-    heroes[4].manaMax = 100;
-    heroes[4].potionSlots[0] = POTION_Health;
-    heroes[4].potionSlots[1] = POTION_Health;
-    heroes[4].potionSlots[2] = POTION_Mana;
-    
-    StartMap(0,0);
-    StartMap(1,1);
-    StartMap(2,2);
-    StartMap(3,3);
-    StartMap(4,4);
-}
-
-void HeroGameDeamon(int hero) {
-    if (heroes[hero].GameCleared != 0) heroes[hero].GameCooldown--;
-    if (heroes[hero].GameLost != 0) heroes[hero].GameCooldown--;
-    if (heroes[hero].GameCooldown <= 0) {
-        if (heroes[hero].GameCleared != 0) {
-            StartMap(hero,heroes[hero].map); // won ... just restart same map for now
-            return;
-        }
-        if (heroes[hero].GameLost != 0) {
-            StartMap(hero,heroes[hero].map); // lost ... restart same map
-            return;
-        }
+    if (key == '9') screen = SCR_GRID;
+    if (key == 'm') screen = (screen == SCR_MENU) ? SCR_GRID : SCR_MENU;
+    if (key == 'g') CollectAllChests();
+    int hk = (key == 'y') ? 0 : (key == 'x') ? 1 : (key == 'c') ? 2 : (key == 'v') ? 3 : (key == 'b') ? 4 : -1;
+    if (hk >= 0 && heroes[hk].isHero) { activeHero = hk; screen = SCR_HERO; }
+    if (screen == SCR_HERO && A) {
+        if (key == '.') activeHero = NextHeroAfter(activeHero, 1);
+        if (key == ',') activeHero = NextHeroAfter(activeHero, -1);
+        if (key >= '1' && key <= '3') HeroUsePotion(activeHero, key - '1');
+        if (key == 'q') HeroUseSkill(activeHero, 0);
+        if (key == 'w') HeroUseSkill(activeHero, 1);
+        if (key == 'e') HeroUseSkill(activeHero, 2);
+        if (key == 'r') HeroUseSkill(activeHero, 3);
+        if (key == 'a') { A->autopilotEnabled = !A->autopilotEnabled; A->manualTimer = 0; }
+        if (key == 'f') { int n; CollectChests(activeHero, &n); Toast("Kisten von %s eingesammelt", A->name); }
     }
+#if DEBUG
+    if (key == '0') for (int i = 0; i < MAX_HEROES; i++) if (instances[i].used) RestartInstance(i);
+    if (key == 'u') { for (int s = 0; s < StageCount; s++) player.cleared[s] = 1; Toast("DEBUG: alle Karten freigeschaltet"); }
+    if (key == 'k') {
+        player.gold += 1e6; player.level += 5; if (player.level > 100) player.level = 100;
+        for (int t = 0; t < TIER_COUNT; t++) for (int k = 0; k < MAT_COUNT; k++) { Item m = ItemMakeMaterial(t, k, 200); InvAdd(&m); }
+        Toast("DEBUG: Gold, Material, Spieler-Level");
+    }
+    if (key == 'l' && A) { HeroGainXp(activeHero, XpNeeded(A->level)); Toast("DEBUG: Level-Up"); }
+#endif
 }
 
 void GameMain(void) {
     engineStep = 0;
     InitMapTiles();
-    InitMapInfos();
-    InitHeroes();
-    InitProjectils();
-    InitWaypoints();
+    InitTemplates();
+    BuildStages();
     InitSettings();
-  //renderHeight = 2160;
-    renderWidth = renderHeight;
-    renderWidth *= 16;
-    renderWidth /= 9;
-    scale = renderHeight;
-    scale /= 1080;
-  //MapRenderDistance = 1024;
-    
-    int Canvas = CreateImage(renderWidth,renderHeight);
-    if (Canvas==0) return;
-    for (int i=0; i<MAX_HEROES; i++) {
-        HeroCanvas[i] = CreateImage(renderWidth,renderHeight);
-        if (HeroCanvas[i]==0) return;
-    }
-    
-    if (LoadTextures() == 0) return;
-    
-    manageMode = 1;
-    TestGame();
-    
-    while (!ShouldQuit()) {
-        
-        for (int i=0; i<MAX_HEROES; i++) HeroDeamon(i);
-        for (int i=0; i<MAX_MAPS; i++) MapDeamon(i);
-        for (int i=0; i<MAX_PROJECTILES; i++) ProjectileDeamon(i);
-        for (int i=0; i<MAX_HEROES; i++) HeroGameDeamon(i);
-        
-        if (manageMode==0) {
-            if (ActiveHero>=0) {
-                DrawHero(HeroCanvas[ActiveHero],ActiveHero);
-                DrawOutput(Canvas);
-                DrawImage(HeroCanvas[ActiveHero],0,0,renderWidth,renderHeight);
-            } else {
-                DrawOutput(Canvas);
-                DrawImage(HeroBG,0,0,renderWidth,renderHeight);
-            }
-        } else {
-            DrawOutput(Canvas);
-            DrawImage(CanvasBG,0,0,renderWidth,renderHeight);
-            for (int slot=0; slot<4; slot++) {
-                int ActiveHero = ActiveHeroSlots[slot];
-                if (ActiveHero>=0) {
-                    DrawHero(HeroCanvas[ActiveHero],ActiveHero);
-                };
-                DrawOutput(Canvas);
-                if (ActiveHero<0) {
-                    if (slot==0) DrawImageScaled(HeroBG,238,130,712,400);
-                    if (slot==1) DrawImageScaled(HeroBG,970,130,712,400);
-                    if (slot==2) DrawImageScaled(HeroBG,238,550,712,400);
-                    if (slot==3) DrawImageScaled(HeroBG,970,550,712,400);
-                } else {
-                    if (slot==0) DrawImageScaled(HeroCanvas[ActiveHero],238,130,712,400);
-                    if (slot==1) DrawImageScaled(HeroCanvas[ActiveHero],970,130,712,400);
-                    if (slot==2) DrawImageScaled(HeroCanvas[ActiveHero],238,550,712,400);
-                    if (slot==3) DrawImageScaled(HeroCanvas[ActiveHero],970,550,712,400);
-                }
-            }
-        }
-        
-        int key = GetKey();
-        if (key==27) return;
-        if (key=='y') {
-            ActiveHero = 0;
-            manageMode = 0;
-        }
-        if (key=='x') {
-            ActiveHero = 1;
-            manageMode = 0;
-        }
-        if (key=='c') {
-            ActiveHero = 2;
-            manageMode = 0;
-        }
-        if (key=='v') {
-            ActiveHero = 3;
-            manageMode = 0;
-        }
-        if (key=='b') {
-            ActiveHero = 4;
-            manageMode = 0;
-        }
-        if (key=='1') {
-            if (manageMode == 0) {
-                if (heroes[ActiveHero].autopilotEnabled == 0) {
-                    HeroUsePotion(ActiveHero,0);
-                }
-            }
-        }
-        if (key=='2') {
-            if (manageMode == 0) {
-                if (heroes[ActiveHero].autopilotEnabled == 0) {
-                    HeroUsePotion(ActiveHero,1);
-                }
-            }
-        }
-        if (key=='3') {
-            if (manageMode == 0) {
-                if (heroes[ActiveHero].autopilotEnabled == 0) {
-                    HeroUsePotion(ActiveHero,2);
-                }
-            }
-        }
-        if (key=='6') {
-            for (int i=0; i<5; i++) {
-                heroes[i].class = CLASS_Knight;
-                heroes[i].skillSlots[0] = 0;
-                heroes[i].skillSlots[1] = 0;
-                heroes[i].skillSlots[2] = 0;
-                heroes[i].skillSlots[3] = 0;
-            }
-        }
-        if (key=='7') {
-            for (int i=0; i<5; i++) {
-                heroes[i].class = CLASS_Archer;
-                heroes[i].skillSlots[0] = 1;
-                heroes[i].skillSlots[1] = 2;
-                heroes[i].skillSlots[2] = 3;
-                heroes[i].skillSlots[3] = 4;
-            }
-        }
-        if (key=='8') {
-            for (int i=0; i<5; i++) {
-                heroes[i].class = CLASS_Mage;
-                heroes[i].skillSlots[0] = 5;
-                heroes[i].skillSlots[1] = 6;
-                heroes[i].skillSlots[2] = 7;
-                heroes[i].skillSlots[3] = 8;
-            }
-        }
-        if (key=='9') {
-            manageMode = 1;
-        }
-        if (key=='0') {
-            StartMap(0,0);
-            StartMap(1,1);
-            StartMap(2,2);
-            StartMap(3,3);
-            StartMap(4,4);
-        }
-        if (key=='q') {
-            if (manageMode == 0) {
-                if (heroes[ActiveHero].autopilotEnabled == 0) {
-                    HeroUseSkill(ActiveHero,heroes[ActiveHero].skillSlots[0]);
-                }
-            }
-        }
-        if (key=='w') {
-            if (manageMode == 0) {
-                if (heroes[ActiveHero].autopilotEnabled == 0) {
-                    HeroUseSkill(ActiveHero,heroes[ActiveHero].skillSlots[1]);
-                }
-            }
-        }
-        if (key=='e') {
-            if (manageMode == 0) {
-                if (heroes[ActiveHero].autopilotEnabled == 0) {
-                    HeroUseSkill(ActiveHero,heroes[ActiveHero].skillSlots[2]);
-                }
-            }
-        }
-        if (key=='r') {
-            if (manageMode == 0) {
-                if (heroes[ActiveHero].autopilotEnabled == 0) {
-                    HeroUseSkill(ActiveHero,heroes[ActiveHero].skillSlots[3]);
-                }
-            }
-        }
-        if (key=='a') {
-            if (manageMode == 0) {
-                if (heroes[ActiveHero].autopilotEnabled != 0) {
-                    DisableAutopilot(ActiveHero);
-                } else {
-                    EnableAutopilot(ActiveHero);
-                }
-            }
-        }
-        
-        DrawOutput(0); /* ab jetzt wird direkt auf das Fenster gezeichnet */
-        
-        int windowWidth_ = WindowWidth();
-        int windowHeight_ = WindowHeight();
-        double scaleX = (double)windowWidth_ / ((double)windowHeight_ * (double)renderWidth / (double)renderHeight);
-        double scaleY = (double)windowHeight_ / ((double)windowWidth_ * (double)renderHeight / (double)renderWidth);
-        
-        if (scaleY < scaleX) {
-            //scaleX /= scaleY;
-            scaleY = 1;
-        } else {
-            //scaleY /= scaleX;
-            scaleX = 1;
-        }
-        
-        int renderWidth_ = (double)windowWidth_ / scaleX;
-        int renderHeight_ = (double)windowHeight_ / scaleY;
-        int renderX_ = (windowWidth_ - renderWidth_) / 2;
-        int renderY_ = (windowHeight_ - renderHeight_) / 2;
-        
-        DrawImage(VoidBG,0,0,windowWidth_,windowHeight_);
-        DrawImage(Canvas,renderX_,renderY_,renderWidth_,renderHeight_);
-        
-        int mouseX_ = (double)((double)GetMouseX() - (double)renderX_) / (double)renderWidth_ * (double)1920;
-        int mouseY_ = (double)((double)GetMouseY() - (double)renderY_) / (double)renderHeight_ * (double)1080;
-        
-        if (GetMouseIsPressed(MOUSEBUTTON_Any)!=0) {
-            ClickCallback(mouseX_,mouseY_);
-        }
-        
-        if (manageMode == 0) {
-            if (heroes[ActiveHero].attacking == 0) {
-                if (heroes[ActiveHero].skilling == 0) {
-                    heroes[ActiveHero].angle = LookAt(heroes[ActiveHero].x,heroes[ActiveHero].y,heroes[ActiveHero].x + (mouseX_-960),heroes[ActiveHero].y + (mouseY_-540));
-                }
-            }
-        }
+    renderWidth = renderHeight * 16 / 9;
+    scale = (double)renderHeight / 1080.0;
 
+    int Canvas = CreateImage(renderWidth, renderHeight);
+    int heroCanvas[4];
+    if (Canvas == 0) return;
+    for (int i = 0; i < 4; i++) { heroCanvas[i] = CreateImage(renderWidth, renderHeight); if (!heroCanvas[i]) return; }
+    if (LoadTextures() == 0) return;
+
+    srand((unsigned)time(NULL));
+    if (!LoadGame()) NewGame();
+    if (HeroCount() == 0) NewGame();
+    SyncLayouts();
+    activeHero = FirstHero();
+    selHero = activeHero;
+    screen = SCR_GRID;
+    int saveTimer = 0, quit = 0;
+
+    /* Test-Hooks (Umgebungsvariablen) */
+    if (getenv("PANOPTYCUS_SIM")) {                       /* nur simulieren, dann Statistik ausgeben */
+        long frames = atol(getenv("PANOPTYCUS_SIM"));
+        if (getenv("PANOPTYCUS_SIM_HEROES")) {
+            int n = atoi(getenv("PANOPTYCUS_SIM_HEROES"));
+            player.level = 100;
+            for (int c = 1; c < n && c < CLASS_COUNT; c++) { int h = CreateHero(c); if (h >= 0) StartStage(h, 0, -1); }
+        }
+        for (long f = 0; f < frames; f++) {
+            SimStep(); engineStep++;
+            if (f % 36000 == 35999 || f == frames - 1) {
+                printf("-- %ld min --  Spieler Lv %d, Gold %.0f, Kills %ld, geschafft:", (f + 1) / 3600, player.level, player.gold, player.totalKills);
+                int cl = 0; for (int s = 0; s < StageCount; s++) cl += player.cleared[s]; printf(" %d\n", cl);
+                for (int h = 0; h < MAX_HEROES; h++) if (heroes[h].isHero)
+                    printf("  %-14s Lv %3d  Karte %-24s Kisten %2d  Kills %ld  HP %.0f/%.0f\n", heroes[h].name, heroes[h].level,
+                           heroes[h].stage >= 0 ? Stages[heroes[h].stage].name : "-", HeroChestTotal(h), heroes[h].kills, heroes[h].hp, heroes[h].hpMax);
+                if (getenv("PANOPTYCUS_SIM_VERBOSE")) for (int h = 0; h < MAX_HEROES; h++) if (heroes[h].isHero && heroes[h].inst >= 0) {
+                    int alive = 0; for (int m = 0; m < MAX_MONSTERS; m++) alive += instances[heroes[h].inst].mon[m].alive;
+                    printf("    %s pos %.0f,%.0f wp %d/%d alive %d state %d walking %d retreat %d atk %d skill %d\n", heroes[h].name, heroes[h].x, heroes[h].y,
+                           heroes[h].waypoint, Templates[Stages[heroes[h].stage].tmpl].nWay, alive, instances[heroes[h].inst].state, heroes[h].walking, heroes[h].retreat, heroes[h].attacking, heroes[h].skilling);
+                }
+            }
+        }
+        return;
+    }
+    if (getenv("PANOPTYCUS_SCREEN")) {
+        const char *sc = getenv("PANOPTYCUS_SCREEN");
+        if (!strcmp(sc, "hero")) screen = SCR_HERO;
+        else if (sc[0] == 'm') { screen = SCR_MENU; menuTab = atoi(sc + 1); }
+        if (getenv("PANOPTYCUS_DEBUGKEYS")) for (const char *k = getenv("PANOPTYCUS_DEBUGKEYS"); *k; k++) HandleKey(*k, &quit);
+    }
+
+    while (!ShouldQuit() && !quit) {
+        /* ---- Eingabe (logische Koordinaten 1920x1080) ---- */
+        int ww = WindowWidth(), wh = WindowHeight();
+        double sx = (double)ww / ((double)wh * renderWidth / renderHeight);
+        double sy = (double)wh / ((double)ww * renderHeight / renderWidth);
+        if (sy < sx) sy = 1; else sx = 1;
+        int rw = (int)((double)ww / sx), rh = (int)((double)wh / sy);
+        int rx = (ww - rw) / 2, ry = (wh - rh) / 2;
+        int mx = GetMouseX(), my = GetMouseY();
+        uiMX = mx < 0 ? -1000 : (int)((double)(mx - rx) / rw * 1920);
+        uiMY = my < 0 ? -1000 : (int)((double)(my - ry) / rh * 1080);
+        uiClick = GetMousePressed(MOUSEBUTTON_Left) != 0;
+        uiRClick = GetMousePressed(MOUSEBUTTON_Right) != 0;
+        uiDown = GetMouseIsPressed(MOUSEBUTTON_Left) != 0;
+        uiWheel = GetMouseWheel();
+        uiClickUsed = 0;
+        uiTipItem = NULL;
+        int key = GetKey();
+        HandleKey(key, &quit);
+
+        /* ---- Simulation ---- */
+        SimStep();
+        if (++shopTimer >= 36000) { ShopRestock(); shopTimer = 0; }
+        if (++saveTimer >= 60 * 30) { SaveGame(); saveTimer = 0; }
+        SyncLayouts();
+        if (!heroes[activeHero].isHero) activeHero = FirstHero();
+
+        /* ---- Zeichnen ---- */
+        DrawOutput(Canvas);
+        if (screen == SCR_HERO && heroes[activeHero].isHero) {
+            DrawHeroView(Canvas, activeHero, 1.0);
+            DrawOutput(Canvas);
+            HeroScreenInput(activeHero);
+        } else if (screen == SCR_GRID) {
+            DrawImageScaled(CanvasBG, 0, 0, 1920, 1080);
+            GridScreen(heroCanvas, Canvas);
+            DrawNavBar(1);
+        } else {
+            MenuScreen();
+            DrawNavBar(1);
+        }
+        DrawToast();
+        UiDrawTooltip();
+
+        /* ---- auf das Fenster skalieren ---- */
+        DrawOutput(0);
+        DrawImage(VoidBG, 0, 0, ww, wh);
+        DrawImage(Canvas, rx, ry, rw, rh);
+        if (getenv("PANOPTYCUS_SHOT") && engineStep == atoi(getenv("PANOPTYCUS_SHOT"))) {
+            SaveScreenshot(getenv("PANOPTYCUS_SHOT_FILE") ? getenv("PANOPTYCUS_SHOT_FILE") : "shot.bmp");
+        }
         FlipBuffers();
         engineStep++;
     }
+    SaveGame();
 }
-

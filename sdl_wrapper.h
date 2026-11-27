@@ -158,4 +158,31 @@ int WindowHeight(void);
  * Abbruchbedingung der Hauptschleife. */
 int ShouldQuit(void);
 
+/* ---- Erweiterungen (UI) ---- */
+
+/* Gefülltes Rechteck (Farbe 0xRRGGBBAA, mit Alpha-Blending) auf die
+ * aktuelle Ausgabe. Viel schneller als Plot() pro Pixel. */
+void FillRect(int x, int y, int w, int h, int c);
+
+/* Wie DrawImage(), multipliziert das Bild aber mit der Farbe c
+ * (0xRRGGBBAA, Weiß = unverändert) - z.B. um Schrift einzufärben. */
+void DrawImageTint(int imageID, int x, int y, int width, int height, int c);
+
+/* Zeichnet nur den Ausschnitt (sx,sy,sw,sh) des Bildes nach (dx,dy,dw,dh),
+ * getönt mit Farbe c (0xRRGGBBAA). Grundlage für Schrift (Font-Atlas). */
+void DrawImagePartTint(int imageID, int sx, int sy, int sw, int sh,
+                       int dx, int dy, int dw, int dh, int c);
+
+/* Wie DrawImageRotated(), getönt mit Farbe c (0xRRGGBBAA). */
+void DrawImageRotatedTint(int imageID, int x, int y, double angleDegree, double scale, int c);
+
+/* Linie von (x1,y1) nach (x2,y2) in Farbe c (0xRRGGBBAA). */
+void DrawLine(int x1, int y1, int x2, int y2, int c);
+
+/* Mausrad-Bewegung seit dem letzten FlipBuffers() (>0 = nach oben). */
+int GetMouseWheel(void);
+
+/* Speichert die aktuelle Ausgabe als BMP. 0 = ok. Für Tests/Doku. */
+int SaveScreenshot(const char *file);
+
 #endif /* SDL_WRAPPER_H */

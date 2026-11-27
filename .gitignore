@@ -1,0 +1,4 @@
+game
+*.o
+/tests/bin/
+savegame.dat
