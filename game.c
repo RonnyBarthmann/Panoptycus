@@ -11,7 +11,7 @@
 #define DEBUG 1
 #define CONFIG_FILE "game.conf"
 #define SAVE_FILE   "savegame.dat"
-#define SAVE_MAGIC  0x50414E32u   /* "PAN2" */
+#define SAVE_MAGIC  0x50414E33u   /* "PAN3" */
 
 #define MOUSEBUTTON_Left 1
 #define MOUSEBUTTON_Right 2

@@ -236,7 +236,7 @@ double ItemPower(const Item *it) {
 }
 
 static const double ARMOR_WEIGHT[4] = { 0.30, 0.50, 0.15, 0.15 };
-static const double BAG_CAPACITY[TIER_COUNT] = { 2, 4, 8, 12, 16, 20 };
+static const double BAG_CAPACITY[TIER_COUNT] = { 3, 10, 30, 100, 300, 1000 };
 static const double WINGS_PCT[TIER_COUNT]    = { 10, 30, 60, 110, 190, 300 };
 
 double WingsSpeedPct(int tier) { return WINGS_PCT[Clampi(tier, 0, TIER_COUNT - 1)]; }

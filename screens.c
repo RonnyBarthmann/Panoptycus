@@ -104,7 +104,12 @@ static void HeroScreenInput(int h) {
     if (uiClick && UiHover(1900 - sz, 20, sz, sz))      { H->autopilotEnabled = !H->autopilotEnabled; H->manualTimer = 0; H->xTarget = H->x; H->yTarget = H->y; uiClickUsed = 1; }
     else if (uiClick && UiHover(1900 - 2 * sz - 20, 20, sz, sz)) { screen = SCR_GRID; uiClickUsed = 1; }
     else if (uiClick && UiHover(1900 - 3 * sz - 40, 20, sz, sz)) { screen = SCR_MENU; uiClickUsed = 1; }
-    else if (uiClick && uiMY > L.stripY - 4) { int n = 0; CollectChests(h, &n); Toast("Kisten von %s eingesammelt", H->name); uiClickUsed = 1; }
+    else if (uiClick && uiMY > L.stripY - 4) {
+        double bsz = L.stripH - 6; int tog = -1;
+        for (int t = 0; t < TIER_COUNT; t++) if (UiHover(20 + t * (bsz + 14), L.stripY + 3, bsz, bsz)) tog = t;
+        if (tog >= 0) { H->chestMask ^= 1u << tog; uiClickUsed = 1; }
+        else { int n = 0; CollectChests(h, &n); Toast("Kisten von %s eingesammelt", H->name); uiClickUsed = 1; }
+    }
     else if (uiClick) {
         for (int s = 0; s < 4; s++) if (UiHover(L.skillX + s * (L.size + L.gap), L.skillY, L.size, L.size)) { HeroUseSkill(h, s); uiClickUsed = 1; }
         for (int s = 0; s < 3; s++) if (UiHover(L.potX + s * (L.size + L.gap), L.potY, L.size, L.size)) { HeroUsePotion(h, s); uiClickUsed = 1; }
@@ -278,6 +283,18 @@ static void HeroesTab(void) {
             LeaveInstance(selHero); ClearHero(selHero);
             for (int l = 0; l < LAYOUT_COUNT; l++) for (int c = 0; c < 4; c++) if (player.layouts[l][c] == selHero) player.layouts[l][c] = -1;
             selHero = FirstHero(); confirmDismiss = 0; return;
+        }
+    }
+    UiText(930, 104, 18, COL_MUTED, "Sammelt Kisten (Klick = an/aus)");
+    for (int t = 0; t < TIER_COUNT; t++) {
+        double tx = 930 + t * 46, ty = 130;
+        int on = (H->chestMask >> t) & 1;
+        UiFill(tx - 2, ty - 2, 40, 40, COL_INK);
+        UiFill(tx, ty, 36, 36, on ? TierColor(t) : 0x8A8278);
+        if (!on) UiText(tx + 8, ty + 2, 30, 0x3A332B, "x");
+        if (UiHover(tx, ty, 36, 36)) {
+            UiFrame(tx - 3, ty - 3, 42, 42, 2, 0xFFFFFF);
+            if (uiClick && !uiClickUsed) { uiClickUsed = 1; H->chestMask ^= 1u << t; }
         }
     }
     if (UiButton(1672, 166, 214, 46, "Kisten holen")) { int n; CollectChests(selHero, &n); Toast("Kisten von %s eingesammelt", H->name); }

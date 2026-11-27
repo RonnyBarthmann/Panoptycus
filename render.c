@@ -380,7 +380,7 @@ static void DrawHud(int h, double u) {
     for (int t = 0; t < TIER_COUNT; t++) {
         double bsz = L.stripH - 6;
         UiFill(bx - 2, L.stripY + 1, bsz + 4, bsz + 4, TierColorDark(t));
-        UiFill(bx, L.stripY + 3, bsz, bsz, TierColor(t));
+        UiFill(bx, L.stripY + 3, bsz, bsz, (H->chestMask >> t) & 1 ? TierColor(t) : 0x6E675F);
         DrawImageScaled(UiIcon[IC_CHESTBOX], bx + bsz * 0.08, L.stripY + 3 + bsz * 0.08, bsz * 0.84, bsz * 0.84);
         snprintf(line, sizeof line, "%d", H->chests[t]);
         UiTextR(bx + bsz - 2, L.stripY + 3 + bsz - 20 * u, 20 * u, 0x000000, line);
@@ -388,7 +388,7 @@ static void DrawHud(int h, double u) {
     }
     snprintf(line, sizeof line, "Kisten %d / %d", HeroChestTotal(h), H->capacity);
     UiText(bx + 10, L.stripY + 6 * u, 26 * u, HeroChestTotal(h) >= H->capacity ? 0xFF7070 : 0xFFE9CC, line);
-    if (u <= 1) UiTextR(1900, L.stripY + 8, 22, 0xFFE9CC, "Klick = einsammeln (F)");
+    if (u <= 1) UiTextR(1900, L.stripY + 8, 22, 0xFFE9CC, "Klick = einsammeln (F) - Stufe anklicken = sammeln an/aus");
 }
 
 /* ================================================================== */
