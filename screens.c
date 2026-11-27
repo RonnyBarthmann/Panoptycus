@@ -343,7 +343,7 @@ static void HeroesTab(void) {
         if (unlocked) UiTextf(x + 8, yy + 58, 18, COL_INK, "Mana %d   Abklingzeit %.1fs", SkillManaCost(selHero, sk), sk->cd / 60.0);
         else UiTextf(x + 8, yy + 58, 18, COL_BAD, "Ab Level %d", sk->unlock);
         if (assigned >= 0) UiTextR(x + 410, yy + 3, 26, COL_GOOD, assigned == 0 ? "[Q]" : (assigned == 1 ? "[W]" : (assigned == 2 ? "[E]" : "[R]")));
-        if (unlocked && UiHover(x, yy, 420, 86) && uiClick && !uiClickUsed) {
+        if (selSlot < 0 && unlocked && UiHover(x, yy, 420, 86) && uiClick && !uiClickUsed) {
             uiClickUsed = 1;
             if (assigned >= 0) H->skillSlots[assigned] = -1;
             else {
