@@ -106,6 +106,7 @@ typedef struct {
     int    autoNext;                 /* nach dem ersten Sieg automatisch zur nächsten Karte */
     int    partner;                  /* zweiter Held auf derselben Karte oder -1 */
     long   kills;
+    unsigned chestMask;              /* Bit t gesetzt = Kisten der Stufe t werden gesammelt */
 } Hero;
 
 /* ---- Karten ---- */

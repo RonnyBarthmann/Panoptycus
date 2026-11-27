@@ -181,7 +181,6 @@ static void RecalcHero(int h) {
     H->healPower = s.healPowerPct;
     H->block = s.blockPct > 60.0 ? 60.0 : s.blockPct;
     H->capacity = CHEST_BASE_CAPACITY + (int)(s.capacity + 0.5);
-    if (H->capacity > 70) H->capacity = 70;
 }
 
 static int SkillUnlocked(int h, int skill) {
@@ -296,6 +295,7 @@ static int CreateHero(int cls) {
     ClearHero(h);
     Hero *H = &heroes[h];
     H->isHero = 1; H->class = cls; H->level = 1;
+    H->chestMask = (1u << TIER_COUNT) - 1;
     H->autopilotEnabled = 1;
     int n = 1;
     for (int i = 0; i < MAX_HEROES; i++) if (i != h && heroes[i].isHero && heroes[i].class == cls) n++;
@@ -317,6 +317,7 @@ static int HeroChestTotal(int h) { int n = 0; for (int t = 0; t < TIER_COUNT; t+
 
 static void AddChest(int h, int tier, int mapLevel) {
     Hero *H = &heroes[h];
+    if (!(H->chestMask & (1u << tier))) return;         /* Stufe abgewählt: Kiste wird nicht aufgehoben */
     if (HeroChestTotal(h) >= H->capacity) return;      /* Rucksack voll: Kiste verfällt */
     H->chests[tier]++;
     if (mapLevel > H->chestLevel[tier]) H->chestLevel[tier] = mapLevel;
