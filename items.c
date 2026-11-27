@@ -236,6 +236,7 @@ double ItemPower(const Item *it) {
 }
 
 static const double ARMOR_WEIGHT[4] = { 0.30, 0.50, 0.15, 0.15 };
+static const double CHEST_ARMOR_CAPACITY[TIER_COUNT] = { 1, 3, 10, 30, 100, 300 };
 static const double BAG_CAPACITY[TIER_COUNT] = { 3, 10, 30, 100, 300, 1000 };
 static const double WINGS_PCT[TIER_COUNT]    = { 10, 30, 60, 110, 190, 300 };
 
@@ -264,7 +265,7 @@ void ItemAddStats(ItemStats *s, const Item *it) {
         double n = LogNorm(str);
         s->defense += str * ARMOR_WEIGHT[it->cat - CAT_HELM];
         if (it->cat == CAT_HELM)   s->critChance     += 40.0 * n;
-        if (it->cat == CAT_CHEST)  s->capacity       += 40.0 * n;
+        if (it->cat == CAT_CHEST)  s->capacity       += CHEST_ARMOR_CAPACITY[Clampi(it->tier, 0, TIER_COUNT - 1)];
         if (it->cat == CAT_GLOVES) s->attackSpeedPct += 100.0 * n;
         if (it->cat == CAT_BOOTS)  s->moveSpeedPct   += 60.0 * n;
         break;
