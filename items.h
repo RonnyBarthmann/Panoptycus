@@ -46,6 +46,48 @@ enum { MAT_ORE = 0, MAT_WOOD, MAT_LEATHER, MAT_ESSENCE, MAT_COUNT };
 #define LEVEL_SKIP_CHANCE     20   /* Prozent, siehe ItemLevelUp()               */
 #define SLOTS_PER_CLASS       24
 
+/* ---- Werte aus tiers.conf / strength.conf (zur Laufzeit geladen) ---- */
+#define MAX_TIER_SLOTS 16
+#define MAX_SLOT_TOTAL 64
+
+typedef struct {
+    char name[24];
+    unsigned int color, colorDark;
+    long   chestDen;                          /* Kiste dieser Stufe: 1 von x Kills            */
+    int    slotCount, slotFirst;              /* Anzahl Waffen/Rüstungen dieser Stufe, erster globaler Slot */
+    int    slotLevel[MAX_TIER_SLOTS];         /* Mindest-Level je Waffe/Rüstung               */
+    double effectPct, wingsPct, bagCap, chestArmorCap;
+    double potEffect[5];                      /* je Trankart                                  */
+    int    potSeconds, potCost, potRefill;
+    int    craftBase, craftStep, craftSimple, craftPotion;
+    double valueMul, materialValue;
+    double monHp, monAtk, monXp, monGold, monSize, monSpawnPct;
+    int    monChestRolls;
+    int    shopUnlock, shopStockBase, shopStockVar;
+} TierConf;
+
+typedef struct { double hpMul, manaMul, atkMul, moveSpeed, range; int atkInterval, ranged; } ClassConf;
+
+typedef struct {
+    int    rows;
+    double table[MAX_SLOT_TOTAL][22];         /* Ritter-Referenz je Slot und Item-Level       */
+    double armorWeight[4], offhandStrength, itemLevelBonus;
+    double helmCritMax, glovesAtkSpeedMax, bootsMoveMax;
+    double offKnightBlock, offKnightBlockMax, offWarriorAtk, offMageMana, offArcherAs,
+           offAssassinCrit, offShamanRegen, offPriestHeal;
+    double jewWarriorCrit, jewAssassinCrit, jewAssassinAs, jewElementalMana, jewElementalRegen,
+           jewLifeHp, jewLifeRegen, necklaceFactor;
+    double valueBase, valueIdxStep, valueOffhand, valueBag, valueRing, valueNeck, valueWings,
+           valuePotion, valueLevel;
+} StrengthConf;
+
+extern TierConf     Tiers[TIER_COUNT];
+extern ClassConf    ClassCfg[CLASS_COUNT];
+extern StrengthConf Str;
+
+/* Lädt strength.conf und tiers.conf aus dem Verzeichnis dir. Rückgabe: Anzahl Fehler. */
+int LoadItemConfigs(const char *dir);
+
 /* Ein Item. Alles 0 = leerer Slot. */
 typedef struct {
     unsigned char  cat;

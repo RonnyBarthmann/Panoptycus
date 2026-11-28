@@ -21,132 +21,15 @@ static Item edItem;
 static int  edDrag = 0;
 static int  edBackedUp = 0;
 
-/* ---- Eingabefokus (Zahlen-/Textfelder) ---- */
-enum { T_INT, T_DBL, T_LONG, T_UC, T_US, T_UINT, T_STR };
-static int    edFocus = 0, edFocusType = 0, edFocusSize = 0;
-static void  *edFocusPtr = NULL;
-static double edFocusMin = 0, edFocusMax = 0, edFx, edFy, edFw, edFh;
-static char   edBuf[64];
-static int    edBufLen = 0;
-
-static double EdGet(int t, const void *p) {
-    switch (t) {
-    case T_INT:  return *(const int *)p;
-    case T_DBL:  return *(const double *)p;
-    case T_LONG: return (double)*(const long *)p;
-    case T_UC:   return *(const unsigned char *)p;
-    case T_US:   return *(const unsigned short *)p;
-    case T_UINT: return *(const unsigned int *)p;
-    }
-    return 0;
-}
-static void EdSetVal(int t, void *p, double v) {
-    switch (t) {
-    case T_INT:  *(int *)p = (int)v; break;
-    case T_DBL:  *(double *)p = v; break;
-    case T_LONG: *(long *)p = (long)v; break;
-    case T_UC:   *(unsigned char *)p = (unsigned char)v; break;
-    case T_US:   *(unsigned short *)p = (unsigned short)v; break;
-    case T_UINT: *(unsigned int *)p = (unsigned int)v; break;
-    }
-}
-static void EdFormat(int t, const void *p, char *out, int n) {
-    double v = EdGet(t, p);
-    if (t == T_DBL) snprintf(out, n, "%.12g", v); else snprintf(out, n, "%.0f", v);
-}
-
-static void EdCommit(void) {
-    if (!edFocus) return;
-    edBuf[edBufLen] = 0;
-    if (edFocusType == T_STR) {
-        snprintf((char *)edFocusPtr, edFocusSize, "%s", edBuf);
-    } else if (edBufLen > 0) {
-        double v = atof(edBuf);
-        if (v != v) v = 0;
-        if (v < edFocusMin) v = edFocusMin;
-        if (v > edFocusMax) v = edFocusMax;
-        EdSetVal(edFocusType, edFocusPtr, v);
-    }
-    edFocus = 0;
-}
-static void EdCancel(void) { edFocus = 0; }
-
-static void EdFocusField(int id, int type, void *ptr, double mn, double mx, int strSize,
-                         double x, double y, double w, double h) {
-    EdCommit();
-    edFocus = id; edFocusType = type; edFocusPtr = ptr; edFocusMin = mn; edFocusMax = mx; edFocusSize = strSize;
-    edFx = x; edFy = y; edFw = w; edFh = h;
-    if (type == T_STR) snprintf(edBuf, sizeof edBuf, "%s", (char *)ptr); else EdFormat(type, ptr, edBuf, sizeof edBuf);
-    edBufLen = (int)strlen(edBuf);
-}
-
-static void EdKey(int key) {
-    if (!edFocus || !key) return;
-    if (key == 10) { EdCommit(); return; }
-    if (key == 27) { EdCancel(); return; }
-    if (key == 8)  { if (edBufLen > 0) edBuf[--edBufLen] = 0; return; }
-    int ok = edFocusType == T_STR ? (key >= 32 && key < 127 && edBufLen < edFocusSize - 1)
-                                  : (strchr("0123456789.-+eE", key) != NULL && edBufLen < 30);
-    if (ok) { edBuf[edBufLen++] = (char)key; edBuf[edBufLen] = 0; }
-}
-
-/* ---- kleine Widgets ---- */
-
-static int EdCheck(double x, double y, const char *label, int *v) {
-    int hov = UiHover(x, y, 30, 30), changed = 0;
-    UiFill(x - 2, y - 2, 34, 34, COL_INK);
-    UiFill(x, y, 30, 30, hov ? COL_PARCH_L : COL_PARCH);
-    if (*v) UiText(x + 5, y - 2, 30, COL_GOOD, "x");
-    UiText(x + 42, y + 3, 22, COL_INK, label);
-    if (hov && uiClick && !uiClickUsed) { uiClickUsed = 1; *v = !*v; changed = 1; }
-    return changed;
-}
-
-/* Beschriftung + [-] [Wert] [+] */
-static int EdNum(int id, double x, double y, double lw, double w, const char *label,
-                 int t, void *p, double mn, double mx) {
-    int changed = 0;
-    UiText(x, y + 6, 20, COL_INK, label);
-    double bx = x + lw;
-    if (UiButtonEx(bx, y, 32, 34, "-", 1, COL_PARCH_D)) { double v = EdGet(t, p) - 1; if (v < mn) v = mn; EdSetVal(t, p, v); changed = 1; }
-    double fx = bx + 38;
-    int focused = edFocus == id;
-    int hov = UiHover(fx, y, w, 34);
-    UiFill(fx - 2, y - 2, w + 4, 38, focused ? 0x2E7D32 : COL_INK);
-    UiFill(fx, y, w, 34, focused ? 0xFFFFFF : (hov ? COL_PARCH_L : COL_PARCH));
-    char b[80];
-    if (focused) snprintf(b, sizeof b, "%s_", edBuf); else EdFormat(t, p, b, sizeof b);
-    double size = 22; while (size > 11 && UiTextWidth(b, size) > w - 10) size -= 1;
-    UiText(fx + 6, y + 6, size, COL_INK, b);
-    if (hov && uiClick && !uiClickUsed) { uiClickUsed = 1; EdFocusField(id, t, p, mn, mx, 0, fx, y, w, 34); }
-    if (UiButtonEx(fx + w + 6, y, 32, 34, "+", 1, COL_PARCH_D)) { double v = EdGet(t, p) + 1; if (v > mx) v = mx; EdSetVal(t, p, v); changed = 1; }
-    return changed;
-}
-
-static void EdText(int id, double x, double y, double lw, double w, const char *label, char *buf, int size) {
-    UiText(x, y + 6, 20, COL_INK, label);
-    double fx = x + lw;
-    int focused = edFocus == id, hov = UiHover(fx, y, w, 34);
-    UiFill(fx - 2, y - 2, w + 4, 38, focused ? 0x2E7D32 : COL_INK);
-    UiFill(fx, y, w, 34, focused ? 0xFFFFFF : (hov ? COL_PARCH_L : COL_PARCH));
-    char b[80]; if (focused) snprintf(b, sizeof b, "%s_", edBuf); else snprintf(b, sizeof b, "%s", buf);
-    UiText(fx + 6, y + 6, 22, COL_INK, b);
-    if (hov && uiClick && !uiClickUsed) { uiClickUsed = 1; EdFocusField(id, T_STR, buf, 0, 0, size, fx, y, w, 34); }
-}
-
-/* Auswahl mit [<] Text [>]; Rückgabe 1, wenn geändert */
-static int EdSel(double x, double y, double lw, double w, const char *label, int *v, int mn, int mx, const char *text) {
-    int changed = 0;
-    UiText(x, y + 6, 20, COL_INK, label);
-    double bx = x + lw;
-    if (UiButtonEx(bx, y, 32, 34, "<", *v > mn, COL_PARCH_D)) { (*v)--; changed = 1; }
-    UiFill(bx + 36, y - 2, w + 4, 38, COL_INK);
-    UiFill(bx + 38, y, w, 34, COL_PARCH);
-    double size = 22; while (size > 11 && UiTextWidth(text, size) > w - 10) size -= 1;
-    UiTextC(bx + 38 + w / 2, y + 6, size, COL_INK, text);
-    if (UiButtonEx(bx + 42 + w, y, 32, 34, ">", *v < mx, COL_PARCH_D)) { (*v)++; changed = 1; }
-    return changed;
-}
+/* Zahlen-/Textfelder, Auswahl und Checkboxen sind in ui.c (gemeinsam mit dem Spiel) */
+#define EdCommit UiCommit
+#define EdFocusField UiFocusField
+#define EdNum(id, x, y, lw, w, label, t, p, mn, mx) UiNumField(id, x, y, lw, w, label, t, p, mn, mx, 0)
+#define EdText UiTextField
+#define EdCheck UiCheck
+#define EdSel UiSelect
+#define edFocus uiFocus
+#define edBuf uiEditBuf
 
 /* ---- Items ---- */
 
@@ -484,8 +367,8 @@ static void EdPlayerMetaView(void) {
     EdNum(2004, x, y, 190, 200, "Besiegte Gegner", T_LONG, &player.totalKills, 0, 9e15); y += 52;
     EdNum(2005, x, y, 190, 120, "Aktive Anordnung", T_INT, &player.activeLayout, 0, LAYOUT_COUNT - 1);
     UiText(x + 190 + 38 + 120 + 50, y + 6, 16, COL_MUTED, "0-3"); y += 52;
-    EdNum(2006, x, y, 190, 120, "Shop-Timer", T_INT, &player.shopTimer, 0, 36000);
-    UiText(x + 190 + 38 + 120 + 50, y + 6, 16, COL_MUTED, "60 = 1 s, 36000 = Nachschub"); y += 62;
+    EdNum(2006, x, y, 190, 120, "Shop-Timer", T_INT, &player.shopTimer, 0, RestockFrames());
+    UiText(x + 190 + 38 + 120 + 50, y + 6, 16, COL_MUTED, "60 = 1 s"); y += 62;
 
     UiText(x, y, 20, COL_INK, "Shop-Vorrat"); y += 34;
     for (int k = 0; k < MAT_COUNT; k++) UiTextC(x + 150 + k * 110 + 50, y, 16, COL_MUTED, MaterialName(k));
@@ -596,11 +479,9 @@ static void EditorMain(int Canvas) {
         if (!uiDown) edDrag = 0;
 
         int key = GetKey();
-        if (edFocus) EdKey(key);
-        else if (key == 27 && (edView == EV_HERO_META)) edView = EV_HEROES;
-        else if (key == 27 && (edView == EV_PLAYER_META)) edView = EV_PLAYER;
-        /* Klick außerhalb des Eingabefeldes übernimmt die Eingabe */
-        if (edFocus && uiClick && !UiHover(edFx, edFy, edFw, edFh)) EdCommit();
+        UiFrameInput(&key);
+        if (key == 27 && edView == EV_HERO_META) edView = EV_HEROES;
+        else if (key == 27 && edView == EV_PLAYER_META) edView = EV_PLAYER;
 
         DrawOutput(Canvas);
         UiFill(0, 0, 1920, 1080, COL_BG);

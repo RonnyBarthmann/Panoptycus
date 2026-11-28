@@ -17,7 +17,6 @@ typedef struct { int used, inst, kind, life, maxLife; double x, y, x2, y2, r; un
 #define MAX_FX 256
 static Effect fxs[MAX_FX];
 
-#define AGGRO_RANGE      720.0
 #define HERO_RADIUS      26
 #define ELITE_RESPAWN_OK 1
 
@@ -180,7 +179,7 @@ static void RecalcHero(int h) {
     H->hpRegen = H->hpMax * (0.002 + s.hpRegenPct / 100.0);
     H->healPower = s.healPowerPct;
     H->block = s.blockPct > 60.0 ? 60.0 : s.blockPct;
-    H->capacity = CHEST_BASE_CAPACITY + (int)(s.capacity + 0.5);
+    H->capacity = (int)cfg.chest_base_capacity + (int)(s.capacity + 0.5);
 }
 
 static int SkillUnlocked(int h, int skill) {
@@ -426,21 +425,21 @@ static int PickMonsterType(int level, int role) {
 
 static void InitMonster(Monster *m, const StageDef *S, int type, int role, double x, double y) {
     int tier = TIER_NORMAL;
-    if (role == ROLE_BOSS) tier = TIER_BOSS;
-    else if (role == ROLE_MINIBOSS) tier = TIER_RARE;
+    if (role == ROLE_BOSS) tier = (int)cfg.boss_tier;
+    else if (role == ROLE_MINIBOSS) tier = (int)cfg.miniboss_tier;
     else {
-        int r = Rnd(2000);
-        tier = r < 1 ? TIER_LEGENDARY : (r < 11 ? TIER_UNIQUE : (r < 51 ? TIER_RARE : (r < 251 ? TIER_MAGIC : TIER_NORMAL)));
+        double r = Rnd01() * 100.0, acc = 0;               /* von der höchsten Stufe abwärts */
+        for (int t = TIER_COUNT - 1; t > TIER_NORMAL; t--) { acc += Tiers[t].monSpawnPct; if (r < acc) { tier = t; break; } }
     }
     const MonsterInfo *mi = &MonsterInfos[type];
     memset(m, 0, sizeof *m);
     m->exist = m->alive = 1; m->type = type; m->tier = tier; m->role = role; m->level = S->level;
     m->x = x; m->y = y;
-    m->hpMax = m->hp = MonsterBaseHP(S->level) * S->hpMul * mi->hp * MONSTER_TIER_HP[tier];
-    m->atk = MonsterBaseAttack(S->level) * S->atkMul * mi->atk * MONSTER_TIER_ATK[tier];
-    m->speed = mi->speed * (role == ROLE_BOSS ? 0.9 : 1.0);
-    m->radius = mi->radius * (role == ROLE_BOSS ? 1.7 : (role == ROLE_MINIBOSS ? 1.3 : (tier >= TIER_UNIQUE ? 1.15 : 1.0)));
-    m->aggro = (role == ROLE_NORMAL) ? 900 : 1200;
+    m->hpMax = m->hp = MonsterBaseHP(S->level) * S->hpMul * mi->hp * Tiers[tier].monHp;
+    m->atk = MonsterBaseAttack(S->level) * S->atkMul * mi->atk * Tiers[tier].monAtk;
+    m->speed = mi->speed * (role == ROLE_BOSS ? cfg.boss_speed_mul : 1.0);
+    m->radius = mi->radius * Tiers[tier].monSize * (role == ROLE_BOSS ? cfg.boss_size : (role == ROLE_MINIBOSS ? cfg.miniboss_size : 1.0));
+    m->aggro = (int)((role == ROLE_NORMAL) ? cfg.monster_aggro : cfg.boss_aggro);
     m->lastHero = -1;
     m->attackCd = 20 + Rnd(30); m->shootCd = 60 + Rnd(60); m->specialCd = 240 + Rnd(120);
 }
@@ -464,6 +463,16 @@ static void SpawnInstanceMonsters(int in) {
             if (!found) continue;
         }
         InitMonster(&I->mon[n++], S, PickMonsterType(S->level, role), role, x, y);
+        /* zusätzliche Monster je Map-Level (nur normale Gegner), leicht versetzt */
+        if (role == ROLE_NORMAL) {
+            double extra = cfg.monster_count_per_level * S->level;
+            int cnt = (int)extra + (Rnd01() < extra - (int)extra ? 1 : 0);
+            for (int k = 0; k < cnt && n < MAX_MONSTERS; k++) {
+                double ex = x + Rnd(121) - 60, ey = y + Rnd(121) - 60;
+                if (getMapCollisionBoxCenter(ex, ey, 24)) { ex = x; ey = y; }
+                InitMonster(&I->mon[n++], S, PickMonsterType(S->level, role), role, ex, ey);
+            }
+        }
     }
 }
 
@@ -528,7 +537,7 @@ static void StageCleared(int in) {
     player.cleared[I->stage] = 1;
     I->state = RUN_CLEARED; I->timer = 240;
     const StageDef *S = &Stages[I->stage];
-    double bonus = GoldPerKill(S->level) * (first ? 60 : 15);
+    double bonus = GoldPerKill(S->level) * (first ? cfg.stage_bonus_first : cfg.stage_bonus_repeat);
     player.gold += bonus;
     for (int k = 0; k < I->nHeroes; k++) HeroGainXp(I->heroId[k], XpForKill(S->level) * (first ? 40 : 10) * S->xpMul);
     PlayerGainXp(XpForKill(S->level) * (first ? 40 : 10));
@@ -541,7 +550,6 @@ static void StageCleared(int in) {
     }
 }
 
-static const int TIER_ROLLS[TIER_COUNT] = { 1, 2, 3, 5, 10, 30 };
 
 static void MonsterDies(int in, int mi) {
     Instance *I = &instances[in];
@@ -549,7 +557,7 @@ static void MonsterDies(int in, int mi) {
     if (!m->alive) return;
     m->alive = 0; m->hp = 0;
     const StageDef *S = &Stages[I->stage];
-    double xp = XpForKill(m->level) * MONSTER_TIER_XP[m->tier] * S->xpMul;
+    double xp = XpForKill(m->level) * Tiers[m->tier].monXp * S->xpMul;
     for (int k = 0; k < I->nHeroes; k++) {
         int h = I->heroId[k];
         if (heroes[h].hp <= 0) continue;
@@ -557,13 +565,13 @@ static void MonsterDies(int in, int mi) {
         heroes[h].kills++;
         HeroFillPotions(h, 0);
     }
-    PlayerGainXp(xp);
+    PlayerGainXp(xp * cfg.player_xp_share);
     player.totalKills++;
-    player.gold += GoldPerKill(m->level) * MONSTER_TIER_XP[m->tier] * 0.5;
+    player.gold += GoldPerKill(m->level) * Tiers[m->tier].monGold;
     /* Kisten: der Held, der den Kill gemacht hat (sonst der erste lebende) */
     int owner = m->lastHero >= 0 ? m->lastHero : I->heroId[0];
     if (owner < 0 || heroes[owner].hp <= 0) owner = I->heroId[0];
-    for (int r = 0; r < TIER_ROLLS[m->tier]; r++)
+    for (int r = 0; r < Tiers[m->tier].monChestRolls; r++)
         for (int t = 0; t < TIER_COUNT; t++)
             if ((unsigned)rand() % (unsigned)TierChestDenominator(t) == 0) AddChest(owner, t, S->level);
     AddFx(in, FX_FLASH, m->x, m->y, 0, 0, m->radius * 1.6, 12, 0xFFFFFF);
@@ -1164,7 +1172,7 @@ static void HeroAI(int h) {
     double range = ClassAttackRange(H->class);
     double tgtDist = BIGFLOAT;
     int tgt = (H->focus >= 0 && instances[H->inst].mon[H->focus].alive) ? H->focus : -1;
-    if (tgt < 0) { H->focus = -1; tgt = HeroNearestMonster(h, AGGRO_RANGE, &tgtDist); }
+    if (tgt < 0) { H->focus = -1; tgt = HeroNearestMonster(h, cfg.hero_aggro_range, &tgtDist); }
     else tgtDist = Dist(H->x, H->y, instances[H->inst].mon[tgt].x, instances[H->inst].mon[tgt].y);
     /* Ziele hinter Wänden ignorieren (kein Pathfinding), ebenso kurz nach dem Festhängen */
     if (tgt >= 0 && tgtDist > 100) {
@@ -1177,8 +1185,8 @@ static void HeroAI(int h) {
     if (tgt >= 0) { Monster *m = &instances[H->inst].mon[tgt]; bossNear = (m->role != ROLE_NORMAL || m->tier >= TIER_UNIQUE) && tgtDist < 700; }
 
     /* Rückzug bei niedrigem Leben und ohne Heiltrank */
-    if (H->hp < H->hpMax * 0.22 && HeroPotionSlotOfKind(h, POT_HEALTH) < 0 && nNear > 0) H->retreat = 1;
-    if (H->hp > H->hpMax * 0.6 || nNear == 0) H->retreat = 0;
+    if (H->hp < H->hpMax * cfg.hero_retreat_hp && HeroPotionSlotOfKind(h, POT_HEALTH) < 0 && nNear > 0) H->retreat = 1;
+    if (H->hp > H->hpMax * cfg.hero_retreat_resume_hp || nNear == 0) H->retreat = 0;
 
     HeroAIPotions(h, nNear, bossNear);
     HeroAISkills(h, tgt, tgtDist);
@@ -1315,17 +1323,18 @@ static int SellItem(int invIdx) {
 
 static double MaterialBuyPrice(int tier, int kind) {
     Item m = ItemMakeMaterial(tier, kind, 1);
-    return ItemSellValue(&m) * 40.0 * pow(2.0, tier) + 5;
+    return ItemSellValue(&m) * cfg.shop_price_factor * pow(cfg.shop_price_tier_growth, tier) + 5;
 }
-static int ShopTierUnlocked(int tier) { return tier <= (player.level >= 100 ? TIER_LEGENDARY : player.level >= 60 ? TIER_BOSS : (player.level >= 40 ? TIER_UNIQUE : (player.level >= 20 ? TIER_RARE : (player.level >= 8 ? TIER_MAGIC : TIER_NORMAL)))); }
+static int RestockFrames(void) { return (int)(cfg.shop_restock_seconds * 60); }
+static int ShopTierUnlocked(int tier) { return player.level >= Tiers[tier].shopUnlock; }
 
 static void ShopRestock(void) {
-    static const int base[TIER_COUNT] = { 30, 6, 3, 1, 0, 0 };
-    static const int var[TIER_COUNT]  = { 20, 5, 3, 2, 2, 2 };
     player.shopTimer = 0;
     for (int t = 0; t < TIER_COUNT; t++)
-        for (int k = 0; k < MAT_COUNT; k++)
-            player.shopStock[t][k] = base[t] + Rnd(var[t] > 0 ? var[t] : 1);
+        for (int k = 0; k < MAT_COUNT; k++) {
+            int var = Tiers[t].shopStockVar;
+            player.shopStock[t][k] = Tiers[t].shopStockBase + (var > 0 ? Rnd(var) : 0);
+        }
 }
 
 static int ShopBuyMaterial(int tier, int kind) {

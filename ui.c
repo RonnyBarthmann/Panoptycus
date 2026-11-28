@@ -54,9 +54,19 @@ static void UiFrame(double x, double y, double w, double h, double t, unsigned i
     UiFill(x + w - t, y + t, t, h - 2 * t, rgb);
 }
 
+/* aktiver Clip-Bereich (scrollbare Listen): außerhalb gibt es keinen Hover/Klick */
+static int    uiClipOn = 0;
+static double uiClipX, uiClipY, uiClipW, uiClipH;
+
 static int UiHover(double x, double y, double w, double h) {
+    if (uiClipOn && !(uiMX >= uiClipX && uiMY >= uiClipY && uiMX < uiClipX + uiClipW && uiMY < uiClipY + uiClipH)) return 0;
     return uiMX >= x && uiMY >= y && uiMX < x + w && uiMY < y + h;
 }
+static void UiClipBegin(double x, double y, double w, double h) {
+    uiClipOn = 1; uiClipX = x; uiClipY = y; uiClipW = w; uiClipH = h;
+    SetClipRect((int)(x * scale + 0.5), (int)(y * scale + 0.5), (int)(w * scale + 0.5), (int)(h * scale + 0.5));
+}
+static void UiClipEnd(void) { uiClipOn = 0; ClearClipRect(); }
 
 /* ---------------------------------------------------------------- */
 /* Text                                                             */
@@ -355,4 +365,209 @@ static void UiDrawTooltip(void) {
         UiText(x + 12, y + 46 + i * 25, 20, col, lines[i]);
     }
     uiTipItem = NULL;
+}
+
+
+/* ================================================================== */
+/* Scrollbare Listen                                                  */
+/* ================================================================== */
+
+typedef struct { double off; } UiScroll;
+static UiScroll *uiScrollDrag = NULL;
+static double    uiScrollDragDY = 0;
+
+/* Beginnt einen scrollbaren Bereich (x,y,w,h). content = Gesamthöhe des Inhalts.
+ * Gezeichnet wird bei  y - s->off  (Rückgabewert); rechts 16 px bleiben für die Leiste frei.
+ * Mausrad über dem Bereich und Ziehen an der Leiste scrollen. Mit UiScrollEnd() beenden. */
+static double UiScrollBegin(UiScroll *s, double x, double y, double w, double h, double content) {
+    double maxOff = content > h ? content - h : 0;
+    int hov = uiMX >= x && uiMY >= y && uiMX < x + w && uiMY < y + h;
+    if (hov && uiWheel && maxOff > 0) { s->off -= uiWheel * 72.0; uiWheel = 0; }
+    if (s->off > maxOff) s->off = maxOff;
+    if (s->off < 0) s->off = 0;
+    if (maxOff > 0) {
+        double tx = x + w - 14, th = h * h / content;
+        if (th < 36) th = 36;
+        double ty = y + (h - th) * (s->off / maxOff);
+        int onThumb = uiMX >= tx && uiMX < tx + 14 && uiMY >= ty && uiMY < ty + th;
+        int onTrack = uiMX >= tx && uiMX < tx + 14 && uiMY >= y && uiMY < y + h;
+        if (uiClick && !uiClickUsed && onThumb) { uiScrollDrag = s; uiScrollDragDY = uiMY - ty; uiClickUsed = 1; }
+        else if (uiClick && !uiClickUsed && onTrack) { s->off += (uiMY < ty ? -1 : 1) * h * 0.85; uiClickUsed = 1; }
+        if (uiScrollDrag == s) {
+            if (uiDown && h > th) { s->off = (uiMY - uiScrollDragDY - y) / (h - th) * maxOff; }
+            else uiScrollDrag = NULL;
+        }
+        if (s->off > maxOff) s->off = maxOff;
+        if (s->off < 0) s->off = 0;
+        ty = y + (h - th) * (s->off / maxOff);
+        UiFill(tx, y, 14, h, 0xC9AE80);
+        UiFill(tx + 1, ty, 12, th, onThumb || uiScrollDrag == s ? 0x6E5A3C : 0x8C7650);
+    }
+    UiClipBegin(x, y, w - (maxOff > 0 ? 16 : 0), h);
+    return s->off;
+}
+static void UiScrollEnd(void) { UiClipEnd(); }
+
+/* ================================================================== */
+/* Eingabefelder: Zahlen, Text, Auswahl, Checkbox                     */
+/* ================================================================== */
+/* Zahlenfelder: anklicken und tippen. Ziffern/Punkt/e werden eingefügt, "+" erhöht und "-" verringert
+ * die Zahl um einen Schritt (statt ein Zeichen einzufügen). Mausrad über dem Feld: Zahl ändern.
+ * Enter übernimmt, Esc verwirft, Klick daneben übernimmt. Werte werden auf min..max begrenzt. */
+
+enum { T_INT, T_DBL, T_LONG, T_UC, T_US, T_UINT, T_STR };
+static int    uiFocus = 0, uiFocusType = 0, uiFocusSize = 0;
+static void  *uiFocusPtr = NULL;
+static double uiFocusMin = 0, uiFocusMax = 0, uiFocusStep = 0, uiFx, uiFy, uiFw, uiFh;
+static char   uiEditBuf[64];
+static int    uiEditBufLen = 0;
+
+static double UiGetVal(int t, const void *p) {
+    switch (t) {
+    case T_INT:  return *(const int *)p;
+    case T_DBL:  return *(const double *)p;
+    case T_LONG: return (double)*(const long *)p;
+    case T_UC:   return *(const unsigned char *)p;
+    case T_US:   return *(const unsigned short *)p;
+    case T_UINT: return *(const unsigned int *)p;
+    }
+    return 0;
+}
+static void UiSetVal(int t, void *p, double v) {
+    switch (t) {
+    case T_INT:  *(int *)p = (int)v; break;
+    case T_DBL:  *(double *)p = v; break;
+    case T_LONG: *(long *)p = (long)v; break;
+    case T_UC:   *(unsigned char *)p = (unsigned char)v; break;
+    case T_US:   *(unsigned short *)p = (unsigned short)v; break;
+    case T_UINT: *(unsigned int *)p = (unsigned int)v; break;
+    }
+}
+static void UiFormatVal(int t, double v, char *out, int n) {
+    if (t == T_DBL) snprintf(out, n, "%.10g", v); else snprintf(out, n, "%.0f", v);
+}
+/* Schrittweite: explizit oder bei großen Fließkommazahlen eine Zehnerpotenz kleiner als die Zahl */
+static double UiStepFor(int t, double v, double step) {
+    if (step > 0) return step;
+    if (t == T_DBL && fabs(v) >= 100) return pow(10.0, floor(log10(fabs(v))) - 1);
+    return 1;
+}
+static double UiStepVal(int t, double v, double dir, double mn, double mx, double step) {
+    double st = UiStepFor(t, v, step);
+    v += dir * st;
+    if (st < 1) v = floor(v / st + 0.5) * st;               /* Rundungsrauschen vermeiden (0.1 + 0.1 ...) */
+    if (v < mn) v = mn;
+    if (v > mx) v = mx;
+    return v;
+}
+
+static void UiCommit(void) {
+    if (!uiFocus) return;
+    uiEditBuf[uiEditBufLen] = 0;
+    if (uiFocusType == T_STR) snprintf((char *)uiFocusPtr, uiFocusSize, "%s", uiEditBuf);
+    else if (uiEditBufLen > 0) {
+        double v = atof(uiEditBuf);
+        if (v != v) v = 0;
+        if (v < uiFocusMin) v = uiFocusMin;
+        if (v > uiFocusMax) v = uiFocusMax;
+        UiSetVal(uiFocusType, uiFocusPtr, v);
+    }
+    uiFocus = 0;
+}
+
+static void UiFocusField(int id, int type, void *ptr, double mn, double mx, int strSize,
+                         double x, double y, double w, double h) {
+    UiCommit();
+    uiFocus = id; uiFocusType = type; uiFocusPtr = ptr; uiFocusMin = mn; uiFocusMax = mx; uiFocusSize = strSize;
+    uiFocusStep = 0; uiFx = x; uiFy = y; uiFw = w; uiFh = h;
+    if (type == T_STR) snprintf(uiEditBuf, sizeof uiEditBuf, "%s", (char *)ptr); else UiFormatVal(type, UiGetVal(type, ptr), uiEditBuf, sizeof uiEditBuf);
+    uiEditBufLen = (int)strlen(uiEditBuf);
+}
+
+/* einmal pro Frame vor der Tastenverarbeitung aufrufen; *key wird auf 0 gesetzt, wenn ein Feld ihn verbraucht */
+static void UiFrameInput(int *key) {
+    if (uiFocus && uiClick && !(uiMX >= uiFx && uiMY >= uiFy && uiMX < uiFx + uiFw && uiMY < uiFy + uiFh)) UiCommit();
+    if (!uiFocus) return;
+    int k = *key; *key = 0;
+    if (!k) return;
+    if (k == 10) { UiCommit(); return; }
+    if (k == 27) { uiFocus = 0; return; }
+    if (k == 8)  { if (uiEditBufLen > 0) uiEditBuf[--uiEditBufLen] = 0; return; }
+    if (uiFocusType == T_STR) {
+        if (k >= 32 && k < 127 && uiEditBufLen < uiFocusSize - 1 && uiEditBufLen < (int)sizeof uiEditBuf - 1) { uiEditBuf[uiEditBufLen++] = (char)k; uiEditBuf[uiEditBufLen] = 0; }
+        return;
+    }
+    if (k == '+' || k == '-') {                               /* sofort erhöhen/verringern */
+        double v = uiEditBufLen ? atof(uiEditBuf) : UiGetVal(uiFocusType, uiFocusPtr);
+        v = UiStepVal(uiFocusType, v, k == '+' ? 1 : -1, uiFocusMin, uiFocusMax, uiFocusStep);
+        UiFormatVal(uiFocusType, v, uiEditBuf, sizeof uiEditBuf);
+        uiEditBufLen = (int)strlen(uiEditBuf);
+        return;
+    }
+    if (strchr("0123456789.eE", k) && uiEditBufLen < 30) { uiEditBuf[uiEditBufLen++] = (char)k; uiEditBuf[uiEditBufLen] = 0; }
+}
+
+/* Beschriftung + [-] [Wert] [+]; step 0 = automatisch. Rückgabe 1, wenn per Knopf/Mausrad geändert */
+static int UiNumField(int id, double x, double y, double lw, double w, const char *label,
+                      int t, void *p, double mn, double mx, double step) {
+    int changed = 0;
+    UiText(x, y + 6, 20, COL_INK, label);
+    double bx = x + lw;
+    double cur = UiGetVal(t, p);
+    if (UiButtonEx(bx, y, 32, 34, "-", 1, COL_PARCH_D)) { UiSetVal(t, p, UiStepVal(t, cur, -1, mn, mx, step)); changed = 1; }
+    double fx = bx + 38;
+    int focused = uiFocus == id;
+    int hov = UiHover(fx, y, w, 34);
+    if (hov && uiWheel && !focused) { UiSetVal(t, p, UiStepVal(t, cur, uiWheel > 0 ? 1 : -1, mn, mx, step)); uiWheel = 0; changed = 1; }
+    if (hov && uiWheel && focused) {                          /* Mausrad ändert auch den Eingabepuffer */
+        double v = uiEditBufLen ? atof(uiEditBuf) : cur;
+        v = UiStepVal(t, v, uiWheel > 0 ? 1 : -1, mn, mx, step); uiWheel = 0;
+        UiFormatVal(t, v, uiEditBuf, sizeof uiEditBuf); uiEditBufLen = (int)strlen(uiEditBuf);
+    }
+    UiFill(fx - 2, y - 2, w + 4, 38, focused ? 0x2E7D32 : COL_INK);
+    UiFill(fx, y, w, 34, focused ? 0xFFFFFF : (hov ? COL_PARCH_L : COL_PARCH));
+    char b[80];
+    if (focused) snprintf(b, sizeof b, "%s_", uiEditBuf); else UiFormatVal(t, UiGetVal(t, p), b, sizeof b);
+    double size = 22; while (size > 11 && UiTextWidth(b, size) > w - 10) size -= 1;
+    UiText(fx + 6, y + 6, size, COL_INK, b);
+    if (hov && uiClick && !uiClickUsed) { uiClickUsed = 1; UiFocusField(id, t, p, mn, mx, 0, fx, y, w, 34); uiFocusStep = step; }
+    cur = UiGetVal(t, p);
+    if (UiButtonEx(fx + w + 6, y, 32, 34, "+", 1, COL_PARCH_D)) { UiSetVal(t, p, UiStepVal(t, cur, 1, mn, mx, step)); changed = 1; }
+    return changed;
+}
+
+static void UiTextField(int id, double x, double y, double lw, double w, const char *label, char *buf, int size) {
+    if (label && *label) UiText(x, y + 6, 20, COL_INK, label);
+    double fx = x + lw;
+    int focused = uiFocus == id, hov = UiHover(fx, y, w, 34);
+    UiFill(fx - 2, y - 2, w + 4, 38, focused ? 0x2E7D32 : COL_INK);
+    UiFill(fx, y, w, 34, focused ? 0xFFFFFF : (hov ? COL_PARCH_L : COL_PARCH));
+    char b[80]; if (focused) snprintf(b, sizeof b, "%s_", uiEditBuf); else snprintf(b, sizeof b, "%s", buf);
+    UiText(fx + 6, y + 6, 22, COL_INK, b);
+    if (hov && uiClick && !uiClickUsed) { uiClickUsed = 1; UiFocusField(id, T_STR, buf, 0, 0, size, fx, y, w, 34); }
+}
+
+static int UiCheck(double x, double y, const char *label, int *v) {
+    int hov = UiHover(x, y, 30, 30), changed = 0;
+    UiFill(x - 2, y - 2, 34, 34, COL_INK);
+    UiFill(x, y, 30, 30, hov ? COL_PARCH_L : COL_PARCH);
+    if (*v) UiText(x + 5, y - 2, 30, COL_GOOD, "x");
+    UiText(x + 42, y + 3, 22, COL_INK, label);
+    if (hov && uiClick && !uiClickUsed) { uiClickUsed = 1; *v = !*v; changed = 1; }
+    return changed;
+}
+
+/* Auswahl mit [<] Text [>]; Rückgabe 1, wenn geändert. Mausrad über dem Text wechselt ebenfalls. */
+static int UiSelect(double x, double y, double lw, double w, const char *label, int *v, int mn, int mx, const char *text) {
+    int changed = 0;
+    UiText(x, y + 6, 20, COL_INK, label);
+    double bx = x + lw;
+    if (UiButtonEx(bx, y, 32, 34, "<", *v > mn, COL_PARCH_D)) { (*v)--; changed = 1; }
+    if (UiHover(bx + 38, y, w, 34) && uiWheel) { int nv = *v + (uiWheel > 0 ? 1 : -1); if (nv >= mn && nv <= mx) { *v = nv; changed = 1; } uiWheel = 0; }
+    UiFill(bx + 36, y - 2, w + 4, 38, COL_INK);
+    UiFill(bx + 38, y, w, 34, COL_PARCH);
+    double size = 22; while (size > 11 && UiTextWidth(text, size) > w - 10) size -= 1;
+    UiTextC(bx + 38 + w / 2, y + 6, size, COL_INK, text);
+    if (UiButtonEx(bx + 42 + w, y, 32, 34, ">", *v < mx, COL_PARCH_D)) { (*v)++; changed = 1; }
+    return changed;
 }

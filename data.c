@@ -64,157 +64,187 @@ static const SkillDef SkillDefs[CLASS_COUNT * SKILLS_PER_CLASS] = {
 #define SKILL_COUNT (CLASS_COUNT * SKILLS_PER_CLASS)
 
 /* ================================================================== */
-/* Monster-Typen                                                      */
+/* Monster-Typen (monsters.conf)                                      */
 /* ================================================================== */
 
-typedef struct { const char *name; double hp, atk, speed, radius; int ranged; } MonsterInfo;
+typedef struct { char name[24]; double hp, atk, speed, radius; int ranged; } MonsterInfo;
+static MonsterInfo MonsterInfos[MONSTER_TYPES] = { { "-", 1, 1, 0, 32, 0 } };
 
-static const MonsterInfo MonsterInfos[MONSTER_TYPES] = {
-    { "-",        1.0, 1.0, 0.0, 32, 0 },
-    { "Dämon",    1.0, 1.0, 2.2, 32, 0 },
-    { "Schleim",  1.6, 0.7, 1.2, 34, 0 },
-    { "Fledermaus", 0.5, 0.8, 4.2, 24, 0 },
-    { "Unhold",   2.2, 1.5, 1.6, 46, 0 },
-    { "Spucker",  0.8, 1.0, 1.8, 30, 1 },
-};
-
-static const double MONSTER_TIER_HP[TIER_COUNT]  = { 1, 2, 4, 8, 7, 64 };
-static const double MONSTER_TIER_ATK[TIER_COUNT] = { 1, 1.2, 1.5, 2, 1.6, 5 };
-static const double MONSTER_TIER_XP[TIER_COUNT]  = { 1, 2.5, 6, 15, 40, 200 };
+static int LoadMonsterConf(const char *dir) {
+    int before = confErrors;
+    char path[256]; ConfDoc d;
+    snprintf(path, sizeof path, "%s%smonsters.conf", dir, *dir ? "/" : "");
+    if (!ConfLoad(&d, path)) { fprintf(stderr, "Fehler: %s nicht gefunden\n", path); return 1; }
+    int n = ConfSectionCount(&d, "monster");
+    if (n != MONSTER_TYPES - 1) ConfError(&d, 0, "es müssen genau %d [monster]-Abschnitte vorhanden sein (gefunden: %d)", MONSTER_TYPES - 1, n);
+    for (int k = 0; k < MONSTER_TYPES - 1 && k < n; k++) {
+        int s = ConfSection(&d, "monster", k);
+        MonsterInfo *m = &MonsterInfos[k + 1];
+        const char *nm = ConfStr(&d, s, "name", 1);
+        snprintf(m->name, sizeof m->name, "%s", nm ? nm : "?");
+        m->hp = ConfNum(&d, s, "hp"); m->atk = ConfNum(&d, s, "attack"); m->speed = ConfNum(&d, s, "speed");
+        m->radius = ConfNum(&d, s, "radius"); m->ranged = (int)ConfNum(&d, s, "ranged");
+    }
+    ConfFree(&d);
+    return confErrors - before;
+}
 
 /* ================================================================== */
-/* Kartenvorlagen (Layouts). Es gibt bisher 5 Karten-Grafiken        */
-/* (assets/map/dev); Kapitel verwenden die Layouts mehrfach.         */
+/* Kartenvorlagen, Kapitel (maps.dat)                                 */
 /* ================================================================== */
+
+#define MAX_CHAPTERS 64
 
 static Template Templates[MAX_TEMPLATES];
-
-static void TplSpawn(Template *t, int x, int y, int role) {
-    if (t->nSpawn >= MAX_MONSTERS) return;
-    t->spawn[t->nSpawn].x = x; t->spawn[t->nSpawn].y = y; t->spawn[t->nSpawn].role = role;
-    t->nSpawn++;
-}
-static void TplWay(Template *t, int x, int y) {
-    if (t->nWay >= MAX_WAYPOINTS) return;
-    t->way[t->nWay].x = x; t->way[t->nWay].y = y; t->nWay++;
-}
-
-static void InitTemplates(void) {
-    memset(Templates, 0, sizeof Templates);
-    Template *t;
-
-    /* Layout 0 (Karte "1-1") */
-    t = &Templates[0];
-    t->startX = 1020; t->startY = 6900; t->angle = 90;
-    TplSpawn(t, 6800, 4500, ROLE_BOSS);
-    TplSpawn(t, 4500, 6000, 0); TplSpawn(t, 4700, 6000, 0); TplSpawn(t, 4500, 5200, 0);
-    TplSpawn(t, 4700, 5200, 0); TplSpawn(t, 5200, 4200, 0); TplSpawn(t, 5200, 4500, 0);
-    TplWay(t, 4600, 6800); TplWay(t, 4600, 4500); TplWay(t, 6800, 4500);
-
-    /* Layout 1 (Karte "1-2"): Monster-Raster */
-    t = &Templates[1];
-    t->startX = 6150; t->startY = 7300; t->angle = 90;
-    TplSpawn(t, 7500, 5900, ROLE_BOSS);
-    for (int y = 5800; y <= 7300; y += 300)
-        for (int x = 6000; x <= 7500; x += 300) TplSpawn(t, x, y, 0);
-    TplWay(t, 7500, 7300); TplWay(t, 6100, 6000); TplWay(t, 7500, 5900);
-
-    /* Layout 2 (Karte "1-3"): lange Monsterreihe */
-    t = &Templates[2];
-    t->startX = 2200; t->startY = 3000; t->angle = 90;
-    TplSpawn(t, 7400, 1950, ROLE_BOSS);
-    for (int x = 5200; x <= 6700; x += 50) TplSpawn(t, x, 3050, 0);
-    TplWay(t, 2200, 5300); TplWay(t, 3500, 5300); TplWay(t, 3500, 3100);
-    TplWay(t, 6700, 3000); TplWay(t, 6700, 2000); TplWay(t, 7400, 1950);
-
-    /* Layout 3 (Karte "1-4"): Zickzack mit Zwischenboss */
-    t = &Templates[3];
-    t->startX = 1100; t->startY = 5500; t->angle = 90;
-    TplSpawn(t, 5900, 900, ROLE_BOSS);
-    TplSpawn(t, 5700, 2000, ROLE_MINIBOSS);
-    { static const int gx[2][2] = { { 2000, 2400 }, { 4000, 4500 } };
-      static const int gy[2][3] = { { 700, 850, 1000 }, { 1850, 2000, 2150 } };
-      for (int r = 0; r < 2; r++) for (int c = 0; c < 2; c++)
-          for (int xi = 0; xi < 2; xi++) for (int yi = 0; yi < 3; yi++)
-              TplSpawn(t, gx[c][xi], gy[r][yi], 0); }
-    TplWay(t, 1100, 2000); TplWay(t, 5700, 2000); TplWay(t, 1100, 2000);
-    TplWay(t, 1100, 900);  TplWay(t, 5900, 900);
-
-    /* Layout 4 (Karte "2-1"): zweite Karten-Grafik */
-    t = &Templates[4];
-    t->startX = 16000; t->startY = 17500; t->angle = 90;
-    TplSpawn(t, 11600, 17400, ROLE_BOSS);
-    TplSpawn(t, 13500, 13000, ROLE_MINIBOSS);
-    TplSpawn(t, 15800, 13000, ROLE_MINIBOSS);
-    static const Pt way4[20] = {
-        {16000,15500},{15836,15236},{15844,15272},{15804,13048},{15308,13016},
-        {14852,13012},{14464,13024},{14328,13124},{13876,13120},{13452,12960},
-        {13472,14400},{13464,15108},{13356,15416},{13356,15416},{13164,15488},
-        {11944,15476},{11740,15532},{11608,15744},{11596,16824},{11600,17400} };
-    for (int i = 0; i < 20; i++) TplWay(t, way4[i].x, way4[i].y);
-    /* zusätzliche Gegner entlang des Weges (Waypoint-Mitte = begehbar) */
-    for (int i = 3; i < 19; i += 2) { TplSpawn(t, way4[i].x + 40, way4[i].y + 20, 0); TplSpawn(t, way4[i].x - 40, way4[i].y - 20, 0); }
-}
-
-/* ================================================================== */
-/* Karten / Kapitel                                                   */
-/* ================================================================== */
+static int      TemplateCount = 0;           /* Karten je Kapitel */
 
 static StageDef Stages[MAX_STAGES];
 static int      StageCount = 0;
 
-#define STORY_CHAPTERS 10
-#define STORY_MAPS_PER_CHAPTER 5
-#define TEMPLE_COUNT 5
-#define RUINS_COUNT 5
+static int  StoryChapters = 0, StoryMapsPerChapter = 0, TempleCount = 0, RuinsCount = 0;
+static char ChapterNames[MAX_CHAPTERS][40];
+static char TempleNames[MAX_CHAPTERS][40];
+static char RuinsNames[MAX_CHAPTERS][40];
 
-static const char *CHAPTER_NAMES[STORY_CHAPTERS] = {
-    "Grenzland", "Dunkelwald", "Sumpf der Vergessenen", "Aschewüste", "Frostgipfel",
-    "Kristallhöhlen", "Verlorene Stadt", "Vulkanschmiede", "Schattenreich", "Der Abgrund"
-};
-static const char *TEMPLE_NAMES[TEMPLE_COUNT] = { "Tempel des Eisens", "Tempel des Feuers", "Tempel des Sturms", "Tempel der Schatten", "Tempel des Himmels" };
-static const char *RUINS_NAMES[RUINS_COUNT]   = { "Ruinen I", "Ruinen II", "Ruinen III", "Ruinen IV", "Ruinen V" };
+static void TplSpawn(Template *t, double x, double y, int role) {
+    if (t->nSpawn >= MAX_MONSTERS) return;
+    t->spawn[t->nSpawn].x = (int)x; t->spawn[t->nSpawn].y = (int)y; t->spawn[t->nSpawn].role = role;
+    t->nSpawn++;
+}
 
-static void BuildStages(void) {
+/* Rolle am Ende einer Zeile (nach den n Zahlen); Standard normal */
+static int ParseRole(ConfDoc *d, int line, const char *val, int nNums) {
+    const char *p = val;
+    for (int i = 0; i < nNums; i++) {
+        while (*p == ' ' || *p == '\t') p++;
+        while (*p && *p != ' ' && *p != '\t') p++;
+    }
+    while (*p == ' ' || *p == '\t') p++;
+    if (!*p || !strcmp(p, "normal")) return ROLE_NORMAL;
+    if (!strcmp(p, "miniboss")) return ROLE_MINIBOSS;
+    if (!strcmp(p, "boss")) return ROLE_BOSS;
+    ConfError(d, line, "unbekannte Rolle '%s' (normal, miniboss oder boss)", p);
+    return ROLE_NORMAL;
+}
+
+static void ParseMap(ConfDoc *d, int sec, Template *t) {
+    double a[8];
+    int it = 0, line; const char *v;
+    int nb = ConfNums(d, sec, "start", a, 3, 1);
+    if (nb == 3) { t->startX = (int)a[0]; t->startY = (int)a[1]; t->angle = (int)a[2]; }
+    else if (nb) ConfError(d, 0, "start braucht 3 Zahlen: x y winkel");
+    /* spawn-Zeilen in Dateireihenfolge, alle Varianten */
+    for (int i = 0; i < d->n; i++) {
+        ConfEntry *e = &d->e[i];
+        if (e->sec != sec) continue;
+        int n;
+        if (!strcmp(e->key, "spawn")) {
+            n = ConfParseNums(e->val, a, 2);
+            if (n != 2) { ConfError(d, e->line, "spawn: x y [rolle]"); continue; }
+            TplSpawn(t, a[0], a[1], ParseRole(d, e->line, e->val, 2));
+        } else if (!strcmp(e->key, "spawn_line")) {
+            n = ConfParseNums(e->val, a, 5);
+            if (n != 5 || a[4] <= 0) { ConfError(d, e->line, "spawn_line: x1 y1 x2 y2 abstand [rolle]"); continue; }
+            int role = ParseRole(d, e->line, e->val, 5);
+            double len = hypot(a[2] - a[0], a[3] - a[1]);
+            int cnt = (int)(len / a[4] + 1e-6) + 1;
+            for (int k = 0; k < cnt; k++) { double f = len > 0 ? k * a[4] / len : 0; TplSpawn(t, a[0] + (a[2] - a[0]) * f, a[1] + (a[3] - a[1]) * f, role); }
+        } else if (!strcmp(e->key, "spawn_grid")) {
+            n = ConfParseNums(e->val, a, 6);
+            if (n != 6 || a[4] <= 0 || a[5] <= 0) { ConfError(d, e->line, "spawn_grid: x1 y1 x2 y2 abstand_x abstand_y [rolle]"); continue; }
+            int role = ParseRole(d, e->line, e->val, 6);
+            for (double y = a[1]; y <= a[3] + 1e-6; y += a[5])
+                for (double x = a[0]; x <= a[2] + 1e-6; x += a[4]) TplSpawn(t, x, y, role);
+        } else if (!strcmp(e->key, "waypoint")) {
+            n = ConfParseNums(e->val, a, 2);
+            if (n != 2) { ConfError(d, e->line, "waypoint: x y"); continue; }
+            if (t->nWay >= MAX_WAYPOINTS) { ConfError(d, e->line, "zu viele Wegpunkte (max. %d)", MAX_WAYPOINTS); continue; }
+            t->way[t->nWay].x = (int)a[0]; t->way[t->nWay].y = (int)a[1]; t->nWay++;
+        }
+    }
+    (void)it; (void)line; (void)v;
+    int bosses = 0; for (int i = 0; i < t->nSpawn; i++) bosses += t->spawn[i].role == ROLE_BOSS;
+    if (!bosses) ConfError(d, 0, "eine Karte hat keinen Boss (spawn ... boss)");
+}
+
+static int LoadMapsDat(const char *dir) {
+    int before = confErrors;
+    char path[256]; ConfDoc d;
+    snprintf(path, sizeof path, "%s%smaps.dat", dir, *dir ? "/" : "");
+    if (!ConfLoad(&d, path)) { fprintf(stderr, "Fehler: %s nicht gefunden\n", path); return 1; }
+    memset(Templates, 0, sizeof Templates);
     StageCount = 0;
-    for (int c = 0; c < STORY_CHAPTERS; c++) {
-        for (int m = 0; m < STORY_MAPS_PER_CHAPTER; m++) {
+
+    TemplateCount = ConfSectionCount(&d, "map");
+    StoryChapters = ConfSectionCount(&d, "chapter");
+    TempleCount = ConfSectionCount(&d, "temple");
+    RuinsCount = ConfSectionCount(&d, "ruins");
+    if (TemplateCount < 1 || TemplateCount > MAX_TEMPLATES) { ConfError(&d, 0, "Anzahl [map]: %d (erlaubt 1 bis %d)", TemplateCount, MAX_TEMPLATES); TemplateCount = TemplateCount < 1 ? 1 : MAX_TEMPLATES; }
+    if (StoryChapters < 1 || StoryChapters > MAX_CHAPTERS) { ConfError(&d, 0, "Anzahl [chapter]: %d (erlaubt 1 bis %d)", StoryChapters, MAX_CHAPTERS); StoryChapters = StoryChapters < 1 ? 1 : MAX_CHAPTERS; }
+    if (TempleCount > MAX_CHAPTERS) TempleCount = MAX_CHAPTERS;
+    if (RuinsCount > MAX_CHAPTERS) RuinsCount = MAX_CHAPTERS;
+    StoryMapsPerChapter = TemplateCount;
+    if (StoryChapters * StoryMapsPerChapter + TempleCount + RuinsCount > MAX_STAGES) {
+        ConfError(&d, 0, "zu viele Karten insgesamt (%d, max. %d)", StoryChapters * StoryMapsPerChapter + TempleCount + RuinsCount, MAX_STAGES);
+        ConfFree(&d); return confErrors - before;
+    }
+    for (int m = 0; m < TemplateCount; m++) ParseMap(&d, ConfSection(&d, "map", m), &Templates[m]);
+
+    for (int c = 0; c < StoryChapters; c++) {
+        int sec = ConfSection(&d, "chapter", c);
+        const char *nm = ConfStr(&d, sec, "name", 1);
+        snprintf(ChapterNames[c], sizeof ChapterNames[c], "%.39s", nm ? nm : "?");
+        double lo = ConfNum(&d, sec, "level_first"), hi = ConfNum(&d, sec, "level_last");
+        int party = (int)ConfNumOpt(&d, sec, "party", 1);
+        if (party < 1 || party > 2) { ConfError(&d, 0, "Kapitel %d: party muss 1 oder 2 sein", c + 1); party = 1; }
+        for (int m = 0; m < StoryMapsPerChapter; m++) {
             StageDef *s = &Stages[StageCount];
-            int idx = c * STORY_MAPS_PER_CHAPTER + m;
             memset(s, 0, sizeof *s);
             s->kind = STAGE_STORY; s->chapter = c; s->index = m;
-            s->level = 1 + idx * 99 / (STORY_CHAPTERS * STORY_MAPS_PER_CHAPTER - 1);
-            s->tmpl = m;                              /* die 5 Original-Karten pro Kapitel */
-            s->partyMax = (c >= 5) ? 2 : 1;           /* mehrere Helden erst in späteren Kapiteln */
-            s->hpMul = (s->partyMax > 1) ? 1.6 : 1.0;
+            double lv = StoryMapsPerChapter > 1 ? lo + (hi - lo) * m / (StoryMapsPerChapter - 1) : lo;
+            s->level = (int)(lv + 0.5);
+            if (s->level < 1) s->level = 1;
+            if (s->level > 100) s->level = 100;
+            s->tmpl = m;
+            s->partyMax = party;
+            s->hpMul = party > 1 ? cfg.party_hp_mul : 1.0;
             s->atkMul = 1.0; s->xpMul = 1.0;
             s->req = StageCount - 1;
-            snprintf(s->name, sizeof s->name, "%d-%d %s", c + 1, m + 1, CHAPTER_NAMES[c]);
+            snprintf(s->name, sizeof s->name, "%d-%d %s", c + 1, m + 1, ChapterNames[c]);
             StageCount++;
         }
     }
-    for (int k = 0; k < TEMPLE_COUNT; k++) {
-        StageDef *s = &Stages[StageCount];
-        memset(s, 0, sizeof *s);
-        s->kind = STAGE_TEMPLE; s->chapter = k; s->index = 0;
-        s->level = 5 + 20 * k; s->tmpl = 4;      /* nur die 5. Original-Karte */
-        s->partyMax = (k >= 2) ? 2 : 1;
-        s->hpMul = 6.0 * (s->partyMax > 1 ? 1.6 : 1.0); s->atkMul = 0.5; s->xpMul = 1.6;
-        s->req = k * 10 + 4;                             /* Kapitel 1,3,5,7,9 abgeschlossen */
-        snprintf(s->name, sizeof s->name, "%s", TEMPLE_NAMES[k]);
-        StageCount++;
+    for (int kind = 0; kind < 2; kind++) {
+        const char *sname = kind == 0 ? "temple" : "ruins";
+        int cnt = kind == 0 ? TempleCount : RuinsCount;
+        for (int k = 0; k < cnt; k++) {
+            int sec = ConfSection(&d, sname, k);
+            StageDef *s = &Stages[StageCount];
+            memset(s, 0, sizeof *s);
+            s->kind = kind == 0 ? STAGE_TEMPLE : STAGE_RUINS; s->chapter = k; s->index = 0;
+            const char *nm = ConfStr(&d, sec, "name", 1);
+            snprintf(s->name, sizeof s->name, "%.39s", nm ? nm : "?");
+            snprintf(kind == 0 ? TempleNames[k] : RuinsNames[k], 40, "%.39s", s->name);
+            int map = (int)ConfNum(&d, sec, "map");
+            if (map < 1 || map > TemplateCount) { ConfError(&d, 0, "%s %d: map %d existiert nicht (1 bis %d)", sname, k + 1, map, TemplateCount); map = 1; }
+            s->tmpl = map - 1;
+            s->level = (int)ConfNum(&d, sec, "level");
+            if (s->level < 1) s->level = 1;
+            if (s->level > 100) s->level = 100;
+            int party = (int)ConfNumOpt(&d, sec, "party", 1);
+            if (party < 1 || party > 2) party = 1;
+            s->partyMax = party;
+            double pm = party > 1 ? cfg.party_hp_mul : 1.0;
+            s->hpMul = (kind == 0 ? cfg.temple_hp_mul : cfg.ruins_hp_mul) * pm;
+            s->atkMul = kind == 0 ? cfg.temple_atk_mul : cfg.ruins_atk_mul;
+            s->xpMul = kind == 0 ? cfg.temple_xp_mul : cfg.ruins_xp_mul;
+            int after = (int)ConfNumOpt(&d, sec, "after_chapter", 0);
+            s->req = (after >= 1 && after <= StoryChapters) ? (after - 1) * StoryMapsPerChapter + (StoryMapsPerChapter - 1) : -1;
+            StageCount++;
+        }
     }
-    for (int k = 0; k < RUINS_COUNT; k++) {
-        StageDef *s = &Stages[StageCount];
-        memset(s, 0, sizeof *s);
-        s->kind = STAGE_RUINS; s->chapter = k; s->index = 0;
-        s->level = 10 + 20 * k; s->tmpl = 4;     /* nur die 5. Original-Karte */
-        s->partyMax = (k >= 2) ? 2 : 1;
-        s->hpMul = 0.6 * (s->partyMax > 1 ? 1.6 : 1.0); s->atkMul = 5.0; s->xpMul = 1.6;
-        s->req = k * 10 + 9;                             /* Kapitel 2,4,6,8,10 abgeschlossen */
-        snprintf(s->name, sizeof s->name, "%s", RUINS_NAMES[k]);
-        StageCount++;
-    }
+    ConfFree(&d);
+    return confErrors - before;
 }
 
 static const char *StageKindName(int kind) {

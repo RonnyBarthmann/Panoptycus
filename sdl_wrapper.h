@@ -185,4 +185,11 @@ int GetMouseWheel(void);
 /* Speichert die aktuelle Ausgabe als BMP. 0 = ok. Für Tests/Doku. */
 int SaveScreenshot(const char *file);
 
+/* Anzeige-Einstellungen zur Laufzeit */
+void SetVSync(int on);              /* vertikale Synchronisation */
+void SetFullscreen(int on);         /* Vollbild (Desktop-Auflösung) */
+void SetFrameLimit(int fps);        /* 0 = unbegrenzt */
+void SetClipRect(int x, int y, int w, int h);   /* Zeichnen auf dieses Rechteck beschränken */
+void ClearClipRect(void);
+
 #endif /* SDL_WRAPPER_H */

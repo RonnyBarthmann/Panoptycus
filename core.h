@@ -5,14 +5,15 @@
  * (game.c bindet die übrigen .c-Dateien direkt ein, wie schon maps.c.) */
 
 #include "items.h"
+#include "config.h"
 
 #define MAX_HEROES      16
 #define MAX_MONSTERS    80
 #define MAX_PROJECTILES 2048
 #define MAX_WAYPOINTS   64
 #define MAX_INV         168
-#define MAX_STAGES      64
-#define MAX_TEMPLATES   8
+#define MAX_STAGES      256
+#define MAX_TEMPLATES   32
 #define MAX_FLOATTEXT   160
 #define LAYOUT_COUNT    4
 #define FPS             60
@@ -114,7 +115,7 @@ typedef struct {
 enum { STAGE_STORY = 0, STAGE_TEMPLE, STAGE_RUINS };
 
 typedef struct {
-    char   name[28];
+    char   name[64];
     int    kind, chapter, index, level, tmpl, partyMax;
     double hpMul, atkMul, xpMul;
     int    req;                       /* Stage-Index, der geschafft sein muss (-1 = frei) */
