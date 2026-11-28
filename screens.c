@@ -98,6 +98,10 @@ static int HudZone(double x, double y) {
 static void HeroScreenInput(int h) {
     Hero *H = &heroes[h];
     HudLayout L = HudGet(1.0);
+    { int w = HeroDeathWait(h); if (w >= 0) {
+        UiTextf(760, 560, 32, 0xFFE9CC, "Gefallen - Neustart in %d:%02d", w / 60, w % 60);
+        if (UiButton(760, 610, 400, 60, "Wartezeit überspringen")) HeroSkipDeath(h);
+    } }
     double sz = 80;
     if (uiClick && UiHover(1900 - sz, 20, sz, sz))      { H->autopilotEnabled = !H->autopilotEnabled; H->manualTimer = 0; H->xTarget = H->x; H->yTarget = H->y; uiClickUsed = 1; }
     else if (uiClick && UiHover(1900 - 2 * sz - 20, 20, sz, sz)) { screen = SCR_GRID; uiClickUsed = 1; }
@@ -163,6 +167,8 @@ static void GridScreen(int *heroCanvas, int canvas) {
         if (h >= 0 && heroes[h].isHero) {
             int tot = HeroChestTotal(h);
             if (UiButtonEx(x + CELL_W - 166, y + 46, 160, 34, "Einsammeln", en && tot > 0, tot > 0 ? 0xFFD34D : COL_PARCH_D)) { int n; CollectChests(h, &n); Toast("%s: Kisten eingesammelt", heroes[h].name); }
+            int w = HeroDeathWait(h);
+            if (w >= 0 && UiButtonEx(x + CELL_W - 250, y + 86, 244, 34, "Überspringen", en, 0xE8B0A8)) HeroSkipDeath(h);
             if (en && inCell && uiClick && !uiClickUsed) { activeHero = h; screen = SCR_HERO; uiClickUsed = 1; }
         }
     }
@@ -299,6 +305,10 @@ static void HeroesTab(void) {
     if (UiButtonEx(1456, 108, 200, 46, H->autopilotEnabled ? "Autopilot: AN" : "Autopilot: AUS", 1, H->autopilotEnabled ? 0xBFE3A8 : 0xE8B0A8)) { H->autopilotEnabled = !H->autopilotEnabled; H->manualTimer = 0; }
     if (UiButton(1672, 108, 214, 46, "Karte wählen")) { screen = SCR_MENU; menuTab = TAB_MAPS; mapHeroA = selHero; }
     if (UiButton(1240, 166, 200, 46, H->autoNext ? "Auto-Weiter: AN" : "Auto-Weiter: AUS")) H->autoNext = !H->autoNext;
+    { int w = HeroDeathWait(selHero); if (w >= 0) {
+        UiTextf(1240, 224, 18, COL_INK, "Gefallen: Neustart in %d:%02d", w / 60, w % 60);
+        if (UiButton(1672, 224, 214, 40, "Überspringen")) HeroSkipDeath(selHero);
+    } }
     int equipEmpty = 1;
     for (int s = 0; s < EQ_COUNT; s++) if (!ItemIsEmpty(&H->equip[s])) equipEmpty = 0;
     if (!equipEmpty) { confirmDismiss = 0; UiText(590, 208, 16, COL_MUTED, "Entlassen nur mit leerer Ausrüstung (alles ablegen)"); }

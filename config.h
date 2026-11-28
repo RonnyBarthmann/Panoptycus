@@ -125,6 +125,7 @@ int         ConfParseNums(const char *s, double *out, int max);
  X(loot_w_necklace,        5,   0, 1e6, 0, "Kisten und Items", "Gewicht Halsketten (halb so oft wie Ringe)") \
  X(shop_price_factor,     40,   0, 1e6, 0, "Shop", "Einkaufspreis Material = Verkaufswert * Faktor * Tier-Wachstum^Stufe") \
  X(shop_price_tier_growth, 2,   1,  100, 0, "Shop", "Preisanstieg je Stufe im Shop") \
+ X(death_cooldown_seconds, 300, 0, 1e6, 0, "Helden", "Sekunden Wartezeit nach dem Tod eines Helden (bzw. der Gruppe), bis die Karte neu startet") \
  X(shop_restock_seconds, 600,   1, 1e6, 0, "Shop", "Sekunden bis zum nächsten Nachschub")
 
 typedef struct {
