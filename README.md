@@ -1,3 +1,5 @@
+# ATTENTION - this fork from IdleManager is HEAVLY AI-Coded (vibe-coded based on a non-vibe-coded base)
+
 # Panoptycus – Idle-RPG-Manager (SDL2, C)
 
 Idle-Spiel im Stil von "Panoptyca": mehrere Helden laufen autonom (Autopilot) durch Karten, besiegen Monster, sammeln Kisten und werden durch Ausrüstung, Handwerk und Tränke stärker.
