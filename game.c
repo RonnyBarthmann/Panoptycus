@@ -11,7 +11,7 @@
 #define DEBUG 1
 #define CONFIG_FILE "game.conf"
 #define SAVE_FILE   "savegame.dat"
-#define SAVE_MAGIC  0x50414E33u   /* "PAN3" */
+#define SAVE_MAGIC  0x50414E34u   /* "PAN4" */
 
 #define MOUSEBUTTON_Left 1
 #define MOUSEBUTTON_Right 2
@@ -82,14 +82,21 @@ static void NewGame(void) {
 
 /* Gruppiert Helden ohne Platz in der aktuellen Anordnung automatisch ein */
 static void SyncLayouts(void) {
+    /* neue Helden werden einmalig in ein freies Feld der Anordnung 1 gesetzt; bewusst geleerte Felder bleiben leer */
+    static unsigned seen = 0; static int init = 0;
     int *lay = player.layouts[0];
     for (int c = 0; c < 4; c++) if (lay[c] >= 0 && !heroes[lay[c]].isHero) lay[c] = -1;
     for (int h = 0; h < MAX_HEROES; h++) {
-        if (!heroes[h].isHero) continue;
+        unsigned bit = 1u << h;
+        if (!heroes[h].isHero) { seen &= ~bit; continue; }
+        if (seen & bit) continue;
+        seen |= bit;
+        if (!init) continue;
         int shown = 0; for (int c = 0; c < 4; c++) if (lay[c] == h) shown = 1;
         if (shown) continue;
         for (int c = 0; c < 4; c++) if (lay[c] < 0) { lay[c] = h; break; }
     }
+    init = 1;
 }
 
 /* ================================================================== */
@@ -239,7 +246,7 @@ void GameMain(void) {
 
         /* ---- Simulation ---- */
         SimStep();
-        if (++shopTimer >= 36000) { ShopRestock(); shopTimer = 0; }
+        if (++player.shopTimer >= 36000) ShopRestock();
         if (++saveTimer >= 60 * 30) { SaveGame(); saveTimer = 0; }
         SyncLayouts();
         if (!heroes[activeHero].isHero) activeHero = FirstHero();

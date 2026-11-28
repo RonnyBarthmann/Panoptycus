@@ -12,7 +12,7 @@ Bauen: `make` (benötigt SDL2, SDL2_image). Tests: `make -C tests` bzw. `tests/t
 - Kisten pro Kill (1/10 … 1/1M), Tragekapazität 10 + bis 60 durch Beutel/Brustrüstung
 - 14 Ausrüstungsplätze, Tränke (dauerhaft, laden sich bei Kills auf), Ringe, Amulette, Flügel
 - Handwerk, Item-Verbesserung (Stufe 0–21, 19→21 per Zufallssprung), Shop (nur Material)
-- 10 Kapitel à 4 Karten, dazu "Tempel" (zähe Gegner) und "Ruinen" (harte Gegner)
+- 10 Kapitel à 5 Karten, dazu "Tempel" und "Ruinen" (jeweils auf der 5. Originalkarte)
 - Ansichten: Vollbild pro Held, 2x2-Raster mit 4 speicherbaren Anordnungen
 - Balancing aus `Strength.ods` (Y3:AU27), logarithmisch
 

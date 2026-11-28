@@ -10,7 +10,7 @@
 #define MAX_MONSTERS    80
 #define MAX_PROJECTILES 2048
 #define MAX_WAYPOINTS   64
-#define MAX_INV         160
+#define MAX_INV         168
 #define MAX_STAGES      64
 #define MAX_TEMPLATES   8
 #define MAX_FLOATTEXT   160
@@ -106,6 +106,7 @@ typedef struct {
     int    autoNext;                 /* nach dem ersten Sieg automatisch zur nächsten Karte */
     int    partner;                  /* zweiter Held auf derselben Karte oder -1 */
     long   kills;
+    int    wpResync;                 /* nach manueller Steuerung: nächsten Wegpunkt neu wählen */
     unsigned chestMask;              /* Bit t gesetzt = Kisten der Stufe t werden gesammelt */
 } Hero;
 
@@ -146,7 +147,7 @@ typedef struct {
     int    layouts[LAYOUT_COUNT][4];
     int    activeLayout;
     long   totalKills;
-    unsigned int shopSeed;
+    int    shopTimer;                /* Frames bis zum nächsten Nachschub */
     int    shopStock[TIER_COUNT][MAT_COUNT];
 } Player;
 
