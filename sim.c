@@ -543,7 +543,7 @@ static void StageCleared(int in) {
     PlayerGainXp(XpForKill(S->level) * (first ? 40 : 10));
     /* automatisch zur nächsten Geschichts-Karte, wenn das erlaubt ist */
     int next = I->stage + 1;
-    if (next < StageCount && !player.cleared[next] && Stages[next].kind == STAGE_STORY && StageUnlocked(next) && Stages[next].partyMax >= I->nHeroes) {
+    if (next < StageCount && Stages[next].kind == STAGE_STORY && StageUnlocked(next) && Stages[next].partyMax >= I->nHeroes) {
         int all = 1;
         for (int k = 0; k < I->nHeroes; k++) if (!heroes[I->heroId[k]].autoNext) all = 0;
         if (all) I->nextStage = next;
@@ -1266,13 +1266,26 @@ static void HeroUpdate(int h) {
     if (H->walking) H->walkCycle++; else H->walkCycle = 0;
 }
 
+/* Restzeit der Todes-Wartezeit in Sekunden, -1 = Held ist nicht ausgeschaltet */
+static int HeroDeathWait(int h) {
+    Hero *H = &heroes[h];
+    if (!H->isHero || H->inst < 0 || !instances[H->inst].used || instances[H->inst].state != RUN_LOST) return -1;
+    return (instances[H->inst].timer + 59) / 60;
+}
+static void HeroSkipDeath(int h) {
+    if (HeroDeathWait(h) >= 0) instances[heroes[h].inst].timer = 1;
+}
+
 static void InstanceUpdate(int in) {
     Instance *I = &instances[in];
     if (!I->used) return;
     if (I->state == RUN_PLAYING) {
         for (int i = 0; i < MAX_MONSTERS; i++) MonsterUpdate(in, i);
         SeparateMonsters(in);
-        if (InstanceAliveHeroes(in) == 0) { I->state = RUN_LOST; I->timer = 240; }
+        if (InstanceAliveHeroes(in) == 0) {
+            I->state = RUN_LOST; I->timer = (int)(cfg.death_cooldown_seconds * 60) + 1;
+            for (int k = 0; k < I->nHeroes; k++) heroes[I->heroId[k]].autoNext = 0;   /* nach dem Tod kein Auto-Weiter mehr */
+        }
     } else {
         if (--I->timer <= 0) {
             if (I->state == RUN_CLEARED && I->nextStage >= 0) {
