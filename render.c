@@ -157,9 +157,11 @@ static void DrawMonster(int in, int mi, double cx, double cy) {
     if (sx < -200 || sx > 2120 || sy < -200 || sy > 1280) return;
     double r = m->radius;
     if (m->tier >= TIER_MAGIC) {              /* Schimmer in der Tier-Farbe (Boss rot, legendär rosa) */
-        double pulse = 0.85 + 0.15 * sin(engineStep * 0.12 + mi);
-        int alpha = m->tier >= TIER_BOSS ? 230 : (m->tier == TIER_UNIQUE ? 170 : 120);
-        DrawGlow(sx, sy, r * (m->tier >= TIER_BOSS ? 2.3 : 1.9) * pulse, TierColor(m->tier), alpha);
+        double pulse = 0.88 + 0.12 * sin(engineStep * 0.12 + mi);
+        static const double gr[TIER_COUNT]  = { 0, 2.4, 2.6, 2.9, 3.3, 3.5 };
+        static const int    ga[TIER_COUNT]  = { 0, 210, 230, 245, 255, 255 };
+        DrawGlow(sx, sy, r * gr[m->tier] * pulse, TierColor(m->tier), ga[m->tier]);          /* äußerer Schimmer */
+        DrawGlow(sx, sy, r * 1.5 * pulse, TierColor(m->tier), 255);                          /* kräftiger Kern */
     }
     int tex = Tex_monster[m->type];
     if (tex) {
@@ -172,7 +174,7 @@ static void DrawMonster(int in, int mi, double cx, double cy) {
         UiBar(sx - 150, sy - r - 40, 300, 22, frac, 0xC03030);
     } else {
         double w = r * 2 + 14 > 60 ? r * 2 + 14 : 60;
-        UiBar(sx - w / 2, sy - r - 18, w, 8, frac, m->tier >= TIER_MAGIC ? TierColor(m->tier) : 0xC03030);
+        UiBar(sx - w / 2, sy - r - 18, w, 8, frac, 0xC03030);
     }
 }
 
