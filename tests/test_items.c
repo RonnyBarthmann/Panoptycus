@@ -3,11 +3,14 @@
 #include <string.h>
 #include <math.h>
 #include "../items.h"
+#include "../config.h"
 
 static int fails = 0;
 #define CHECK(c) do { if (!(c)) { printf("FAIL line %d: %s\n", __LINE__, #c); fails++; } } while (0)
 
 int main(void) {
+    CfgInit();
+    if (LoadItemConfigs("..") != 0) { printf("FAIL: Konfiguration\n"); return 1; }
     /* Werte aus Strength.ods */
     CHECK(fabs(TableStrength(0, 0) - 5.0) < 1e-9);
     CHECK(fabs(TableStrength(23, 21) - 10237399.7) < 1.0);

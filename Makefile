@@ -3,7 +3,7 @@ CFLAGS  = -Wall -Wextra -std=c11 $(shell pkg-config --cflags sdl2 SDL2_image)
 LDFLAGS = $(shell pkg-config --libs sdl2 SDL2_image) -lm
 
 TARGET  = game
-SRCS    = main.c sdl_wrapper.c items.c game.c
+SRCS    = main.c sdl_wrapper.c config.c items.c game.c
 OBJS    = $(SRCS:.c=.o)
 
 all: $(TARGET)

@@ -227,6 +227,7 @@ static void DrawEffects(int in, double cx, double cy) {
 }
 
 static void DrawFloatTexts(int in, double cx, double cy) {
+    if (cfg.floating_text == 0) return;
     for (int i = 0; i < MAX_FLOATTEXT; i++) {
         FloatText *f = &floatTexts[i];
         if (f->life <= 0 || f->inst != in) continue;

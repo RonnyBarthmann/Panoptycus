@@ -2,7 +2,11 @@
  * (wird von game.c eingebunden) */
 
 enum { SCR_HERO = 0, SCR_GRID, SCR_MENU };
-enum { TAB_HEROES = 0, TAB_INV, TAB_CRAFT, TAB_SHOP, TAB_MAPS, TAB_COUNT };
+enum { TAB_HEROES = 0, TAB_INV, TAB_CRAFT, TAB_SHOP, TAB_MAPS, TAB_SETTINGS, TAB_COUNT };
+
+/* Scroll-Zustände der Listen */
+static UiScroll scHeroes, scChests, scCraft, scChapters, scStages, scMapHeroes, scSettings;
+static char newHeroName[20];
 
 static int  screen = SCR_GRID;
 static int  menuTab = TAB_HEROES;
@@ -17,7 +21,7 @@ static int  mapGroup = 0, mapSel = -1, mapHeroA = -1, mapHeroB = -1;
 static int  shopSellTier = 1;
 static char toast[120]; static int toastTimer = 0;
 
-static const char *NAV_NAMES[TAB_COUNT] = { "Helden", "Inventar", "Handwerk", "Shop", "Karten" };
+static const char *NAV_NAMES[TAB_COUNT] = { "Helden", "Inventar", "Handwerk", "Shop", "Karten", "Einstellungen" };
 
 #define Toast(...) do { snprintf(toast, sizeof toast, __VA_ARGS__); toastTimer = 200; } while (0)
 
@@ -59,7 +63,7 @@ static void DrawNavBar(int showTabs) {
     if (UiButtonEx(x, 10, 150, 56, "Vollbild", FirstHero() >= 0, screen == SCR_HERO ? 0xFFE9CC : COL_PARCH_D)) { if (!heroes[activeHero].isHero) activeHero = FirstHero(); screen = SCR_HERO; }
     x += 182;
     for (int t = 0; t < TAB_COUNT; t++) {
-        if (UiButtonEx(x, 10, 160, 56, NAV_NAMES[t], 1, (screen == SCR_MENU && menuTab == t) ? 0xFFE9CC : COL_PARCH_D)) { screen = SCR_MENU; menuTab = t; }
+        if (UiButtonEx(x, 10, t == TAB_SETTINGS ? 190 : 160, 56, NAV_NAMES[t], 1, (screen == SCR_MENU && menuTab == t) ? 0xFFE9CC : COL_PARCH_D)) { screen = SCR_MENU; menuTab = t; }
         x += 172;
     }
     (void)showTabs;
@@ -225,8 +229,9 @@ static void ClassPickDialog(void) {
     UiFill(0, 78, 1920, 1002, 0x000000 | 0); UiFillA(0, 78, 1920, 1002, 0x000000, 150);
     UiPanel(360, 160, 1200, 760);
     UiPanelTitle(360, 160, 1200, "Neuen Helden erstellen - Klasse wählen");
+    UiTextField(5002, 390, 214, 220, 360, "Name (leer = automatisch)", newHeroName, (int)sizeof newHeroName);
     for (int c = 0; c < CLASS_COUNT; c++) {
-        double x = 390 + (c % 4) * 292, y = 230 + (c / 4) * 250;
+        double x = 390 + (c % 4) * 292, y = 270 + (c / 4) * 250;
         UiFill(x - 3, y - 3, 270 + 6, 230 + 6, COL_INK);
         UiFill(x, y, 270, 230, UiHover(x, y, 270, 230) ? COL_PARCH_L : COL_PARCH_D);
         UiFill(x, y, 270, 8, CLASS_COLORS[c]);
@@ -245,7 +250,10 @@ static void ClassPickDialog(void) {
         if (UiHover(x, y, 270, 230) && uiClick && !uiClickUsed) {
             uiClickUsed = 1;
             int h = CreateHero(c);
-            if (h >= 0) { StartStage(h, 0, -1); selHero = h; Toast("%s erstellt", heroes[h].name); }
+            if (h >= 0) {
+                if (newHeroName[0]) snprintf(heroes[h].name, sizeof heroes[h].name, "%s", newHeroName);
+                StartStage(h, 0, -1); selHero = h; Toast("%s erstellt", heroes[h].name);
+            }
             else Toast("Kein freier Heldenplatz");
             pickClass = 0;
         }
@@ -259,9 +267,10 @@ static void HeroesTab(void) {
     UiPanel(20, 96, 520, 960);
     UiPanelTitle(20, 96, 520, "Helden");
     int row = 0;
+    double off = UiScrollBegin(&scHeroes, 24, 142, 512, 808, HeroCount() * 66 + 8);
     for (int h = 0; h < MAX_HEROES; h++) {
         if (!heroes[h].isHero) continue;
-        double y = 148 + row * 66;
+        double y = 148 + row * 66 - off;
         int sel = (h == selHero);
         UiFill(28, y, 504, 60, sel ? 0xFFE9CC : COL_PARCH_D);
         UiFill(28, y, 10, 60, CLASS_COLORS[heroes[h].class]);
@@ -272,7 +281,8 @@ static void HeroesTab(void) {
         if (UiHover(28, y, 504, 60) && uiClick && !uiClickUsed) { selHero = h; selSlot = -1; confirmDismiss = 0; uiClickUsed = 1; }
         row++;
     }
-    if (UiButtonEx(36, 996, 488, 46, "+ Neuen Helden erstellen", HeroCount() < HeroSlots(), 0xBFE3A8)) pickClass = 1;
+    UiScrollEnd();
+    if (UiButtonEx(36, 996, 488, 46, "+ Neuen Helden erstellen", HeroCount() < HeroSlots(), 0xBFE3A8)) { pickClass = 1; newHeroName[0] = 0; }
     if (HeroCount() >= HeroSlots()) UiText(40, 960, 20, COL_MUTED, "Mehr Plätze: Spieler-Level steigern");
 
     if (!heroes[selHero].isHero) { UiText(600, 200, 32, COL_INK, "Noch kein Held. Erstelle deinen ersten Helden!"); return; }
@@ -281,7 +291,7 @@ static void HeroesTab(void) {
     /* Kopf */
     UiPanel(560, 96, 1340, 130);
     UiFill(560, 96, 14, 130, CLASS_COLORS[H->class]);
-    UiTextf(590, 102, 40, COL_INK, "%s", H->name);
+    UiTextField(5001, 590, 100, 0, 330, "", H->name, (int)sizeof H->name);
     UiTextf(590, 150, 24, COL_MUTED, "%s - Level %d", ClassName(H->class), H->level);
     UiBar(590, 190, 420, 16, H->level >= HERO_MAX_LEVEL ? 1 : H->xp / XpNeeded(H->level), 0xD9A400);
     { char a[32], b[32]; FormatNumber(H->xp, a, sizeof a); FormatNumber(XpNeeded(H->level), b, sizeof b); UiTextf(1020, 186, 20, COL_INK, "EP %s / %s", a, b); }
@@ -458,9 +468,10 @@ static void InventoryTab(void) {
     UiPanel(rx, 516, rw, 420);
     UiPanelTitle(rx, 516, rw, "Kisten der Helden");
     int row = 0;
+    double off = UiScrollBegin(&scChests, rx + 4, 560, rw - 8, 312, HeroCount() * 42 + 4);
     for (int h = 0; h < MAX_HEROES; h++) {
         if (!heroes[h].isHero) continue;
-        double y = 570 + row * 42;
+        double y = 570 + row * 42 - off;
         UiTextf(rx + 14, y + 6, 22, COL_INK, "%s", heroes[h].name);
         double x = rx + 200;
         for (int t = 0; t < TIER_COUNT; t++) {
@@ -469,8 +480,9 @@ static void InventoryTab(void) {
             x += 70;
         }
         UiTextf(x + 4, y + 6, 20, COL_MUTED, "%d/%d", HeroChestTotal(h), heroes[h].capacity);
-        if (row++ >= 7) break;
+        row++;
     }
+    UiScrollEnd();
     if (UiButton(rx + 14, 880, rw - 28, 46, "Alle Kisten einsammeln (G)")) CollectAllChests();
 
     UiPanel(rx, 956, rw, 100);
@@ -513,15 +525,20 @@ static void CraftingTab(void) {
     if (cat == CAT_POTION)
         for (int p = 0; p < POT_COUNT; p++) if (UiButtonEx(356 + p * 190, 150, 184, 40, PotionName(p), 1, p == craftPotion ? 0xFFE9CC : COL_PARCH_D)) { craftPotion = p; craftSel = -1; }
     int single = (cat == CAT_OFFHAND || cat == CAT_BAG || cat == CAT_POTION);
+    double content = 0;
+    for (int t = 0; t < TIER_COUNT; t++) { int sl = single ? 1 : TierSlotCount(t); content += 44 + ((sl + 6) / 7) * 94 + 10; }
+    double off = UiScrollBegin(&scCraft, 350, 208, 980, 840, content);
+    double yTop = 214 - off;
     for (int t = 0; t < TIER_COUNT; t++) {
-        double y = 214 + t * 134;
-        UiFill(356, y, 968, 124, Mix(TierColor(t), 0xFFFFFF, 0.55));
-        UiFill(356, y, 10, 124, TierColor(t));
-        UiText(376, y + 4, 24, COL_INK, TierName(t));
         int slots = single ? 1 : TierSlotCount(t);
+        double blockH = 44 + ((slots + 6) / 7) * 94;
+        double y = yTop;
+        UiFill(356, y, 950, blockH, Mix(TierColor(t), 0xFFFFFF, 0.55));
+        UiFill(356, y, 10, blockH, TierColor(t));
+        UiText(376, y + 4, 24, COL_INK, TierName(t));
         for (int i = 0; i < slots; i++) {
             Item it = CraftItemAt(t, i);
-            double x = 376 + i * 128, yy = y + 36;
+            double x = 376 + (i % 7) * 128, yy = y + 36 + (i / 7) * 94;
             int id = t * 100 + i;
             int res = UiItemSlot(x, yy, 76, &it, craftSel == id);
             UiTextf(x, yy + 78, 16, COL_MUTED, single ? "" : "Lv %d", ItemRequiredLevel(&it));
@@ -529,7 +546,9 @@ static void CraftingTab(void) {
             if (ItemRecipe(&it, &r) && RecipeAffordable(&r)) UiFillA(x + 62, yy - 6, 14, 14, 0x40D060, 255);
             if (res == 1) craftSel = id;
         }
+        yTop += blockH + 10;
     }
+    UiScrollEnd();
     /* Rezept */
     UiPanel(1360, 96, 540, 960);
     UiPanelTitle(1360, 96, 540, "Rezept");
@@ -615,7 +634,7 @@ static void ShopTab(void) {
         Toast("%d Gegenstände verkauft", count);
     }
     UiText(1060, 420, 22, COL_INK, "Verkauf einzelner Dinge: Inventar => Verkaufen");
-    UiTextf(1060, 480, 24, COL_INK, "Nächster Nachschub in %d:%02d", (36000 - player.shopTimer) / 3600, ((36000 - player.shopTimer) / 60) % 60);
+    UiTextf(1060, 480, 24, COL_INK, "Nächster Nachschub in %d:%02d", (RestockFrames() - player.shopTimer) / 3600, ((RestockFrames() - player.shopTimer) / 60) % 60);
     UiText(1060, 516, 18, COL_MUTED, "Der Vorrat füllt sich alle 10 Minuten von selbst auf.");
 }
 
@@ -623,63 +642,68 @@ static void ShopTab(void) {
 /* Karten-Tab                                                         */
 /* ================================================================== */
 
-#define MAP_GROUPS (STORY_CHAPTERS + 2)
+#define MAP_GROUPS (StoryChapters + 2)
 
 static void GroupStages(int g, int *first, int *count) {
-    if (g < STORY_CHAPTERS) { *first = g * STORY_MAPS_PER_CHAPTER; *count = STORY_MAPS_PER_CHAPTER; }
-    else if (g == STORY_CHAPTERS) { *first = STORY_CHAPTERS * STORY_MAPS_PER_CHAPTER; *count = TEMPLE_COUNT; }
-    else { *first = STORY_CHAPTERS * STORY_MAPS_PER_CHAPTER + TEMPLE_COUNT; *count = RUINS_COUNT; }
+    if (g < StoryChapters) { *first = g * StoryMapsPerChapter; *count = StoryMapsPerChapter; }
+    else if (g == StoryChapters) { *first = StoryChapters * StoryMapsPerChapter; *count = TempleCount; }
+    else { *first = StoryChapters * StoryMapsPerChapter + TempleCount; *count = RuinsCount; }
 }
 
 static void MapsTab(void) {
     if (mapHeroA < 0 || !heroes[mapHeroA].isHero) mapHeroA = heroes[selHero].isHero ? selHero : FirstHero();
     UiPanel(20, 96, 360, 960);
     UiPanelTitle(20, 96, 360, "Kapitel");
+    double off = UiScrollBegin(&scChapters, 24, 142, 352, 908, MAP_GROUPS * 66 + 8);
     for (int g = 0; g < MAP_GROUPS; g++) {
-        char b[48];
-        if (g < STORY_CHAPTERS) snprintf(b, sizeof b, "%d  %s", g + 1, CHAPTER_NAMES[g]);
-        else snprintf(b, sizeof b, g == STORY_CHAPTERS ? "Tempel (zähe Gegner)" : "Ruinen (harte Gegner)");
+        char b[64];
+        if (g < StoryChapters) snprintf(b, sizeof b, "%d  %s", g + 1, ChapterNames[g]);
+        else snprintf(b, sizeof b, g == StoryChapters ? "Tempel (zähe Gegner)" : "Ruinen (harte Gegner)");
         int first, cnt; GroupStages(g, &first, &cnt);
-        int open = StageUnlocked(first);
-        if (UiButtonEx(34, 150 + g * 66, 332, 56, b, open, g == mapGroup ? 0xFFE9CC : (g >= STORY_CHAPTERS ? 0xE8C8F0 : COL_PARCH_D))) { mapGroup = g; mapSel = -1; }
+        int open = cnt > 0 && StageUnlocked(first);
+        if (UiButtonEx(34, 150 + g * 66 - off, 332 - 18, 56, b, open, g == mapGroup ? 0xFFE9CC : (g >= StoryChapters ? 0xE8C8F0 : COL_PARCH_D))) { mapGroup = g; mapSel = -1; scStages.off = 0; }
     }
+    UiScrollEnd();
+    if (mapGroup >= MAP_GROUPS) mapGroup = 0;
     int first, cnt; GroupStages(mapGroup, &first, &cnt);
     UiPanel(400, 96, 900, 960);
-    UiPanelTitle(400, 96, 900, mapGroup < STORY_CHAPTERS ? CHAPTER_NAMES[mapGroup] : (mapGroup == STORY_CHAPTERS ? "Tempel" : "Ruinen"));
+    UiPanelTitle(400, 96, 900, mapGroup < StoryChapters ? ChapterNames[mapGroup] : (mapGroup == StoryChapters ? "Tempel" : "Ruinen"));
+    off = UiScrollBegin(&scStages, 404, 142, 892, 908, cnt * 176 + 8);
     for (int i = 0; i < cnt; i++) {
         int s = first + i;
         const StageDef *S = &Stages[s];
-        double y = 156 + i * 176;
+        double y = 156 + i * 176 - off;
         int open = StageUnlocked(s), cleared = player.cleared[s], sel = (mapSel == s);
-        UiFill(414, y - 3, 872, 166, COL_INK);
-        UiFill(417, y, 866, 160, sel ? 0xFFE9CC : (open ? COL_PARCH_D : 0xBDB3A3));
+        UiFill(414, y - 3, 854, 166, COL_INK);
+        UiFill(417, y, 848, 160, sel ? 0xFFE9CC : (open ? COL_PARCH_D : 0xBDB3A3));
         UiText(436, y + 6, 32, COL_INK, S->name);
         UiTextf(436, y + 48, 22, COL_INK, "Monster-Level %d   %s", S->level, StageKindName(S->kind));
         UiTextf(436, y + 78, 20, COL_MUTED, S->partyMax > 1 ? "Gruppen: bis zu 2 Helden" : "Nur 1 Held");
-        UiText(436, y + 106, 20, cleared ? COL_GOOD : (open ? COL_INK : COL_BAD), cleared ? "Geschafft OK" : (open ? "Freigeschaltet" : "Gesperrt - vorherige Karte schaffen"));
+        UiText(436, y + 106, 20, cleared ? COL_GOOD : (open ? COL_INK : COL_BAD), cleared ? "Geschafft OK" : (open ? "Freigeschaltet" : "Gesperrt - Voraussetzung schaffen"));
         /* Helden, die gerade hier sind */
-        double hx = 1000;
+        double hy = y + 10;
         for (int h = 0; h < MAX_HEROES; h++) if (heroes[h].isHero && heroes[h].stage == s) {
-            UiFill(hx, y + 10, 24, 24, CLASS_COLORS[heroes[h].class]); UiText(hx + 30, y + 10, 18, COL_INK, heroes[h].name); hx += 0; y += 0;
-            UiText(hx + 30, y + 10, 18, COL_INK, ""); y += 0;
+            UiFill(1000, hy, 24, 24, CLASS_COLORS[heroes[h].class]); UiText(1030, hy, 18, COL_INK, heroes[h].name); hy += 28;
         }
-        if (open && UiHover(417, y, 866, 160) && uiClick && !uiClickUsed) { mapSel = s; uiClickUsed = 1; }
+        if (open && UiHover(417, y, 848, 160) && uiClick && !uiClickUsed) { mapSel = s; uiClickUsed = 1; }
     }
+    UiScrollEnd();
     /* Heldenwahl + Start */
     UiPanel(1320, 96, 580, 960);
     UiPanelTitle(1320, 96, 580, "Helden schicken");
     int maxHeroes = mapSel >= 0 ? Stages[mapSel].partyMax : 1;
     UiTextf(1340, 150, 20, COL_MUTED, mapSel >= 0 ? "Wähle %s" : "Zuerst Karte wählen", maxHeroes > 1 ? "bis zu 2 Helden" : "1 Helden");
     int row = 0;
+    off = UiScrollBegin(&scMapHeroes, 1324, 182, 572, 780, HeroCount() * 56 + 8);
     for (int h = 0; h < MAX_HEROES; h++) {
         if (!heroes[h].isHero) continue;
-        double y = 184 + row * 56;
+        double y = 184 + row * 56 - off;
         int chosen = (h == mapHeroA || h == mapHeroB);
-        UiFill(1334, y, 552, 50, chosen ? 0xBFE3A8 : COL_PARCH_D);
+        UiFill(1334, y, 534, 50, chosen ? 0xBFE3A8 : COL_PARCH_D);
         UiFill(1334, y, 8, 50, CLASS_COLORS[heroes[h].class]);
         UiTextf(1354, y + 4, 24, COL_INK, "%s  Lv %d", heroes[h].name, heroes[h].level);
         UiTextf(1354, y + 28, 16, COL_MUTED, "%s", heroes[h].stage >= 0 ? Stages[heroes[h].stage].name : "im Lager");
-        if (UiHover(1334, y, 552, 50) && uiClick && !uiClickUsed) {
+        if (UiHover(1334, y, 534, 50) && uiClick && !uiClickUsed) {
             uiClickUsed = 1;
             if (h == mapHeroA) { mapHeroA = mapHeroB; mapHeroB = -1; }
             else if (h == mapHeroB) mapHeroB = -1;
@@ -687,12 +711,65 @@ static void MapsTab(void) {
             else if (maxHeroes > 1 && mapHeroB < 0) mapHeroB = h;
             else mapHeroA = h;
         }
-        if (++row >= 14) break;
+        row++;
     }
+    UiScrollEnd();
     int canStart = mapSel >= 0 && mapHeroA >= 0 && StageUnlocked(mapSel) && (mapHeroB < 0 || maxHeroes > 1);
     if (UiButtonEx(1340, 980, 540, 56, "Auf die Karte schicken", canStart, 0xBFE3A8)) {
         int b = (maxHeroes > 1) ? mapHeroB : -1;
         if (StartStage(mapHeroA, mapSel, b)) { Toast("Los geht's: %s", Stages[mapSel].name); activeHero = mapHeroA; }
+    }
+}
+
+/* ================================================================== */
+/* Einstellungen-Tab                                                  */
+/* ================================================================== */
+
+/* Schrittweite im Spiel für einzelne Einstellungen (0 = automatisch) */
+static double SettingStep(const char *name) {
+    if (!strcmp(name, "gamespeed")) return 0.1;
+    if (!strcmp(name, "max_fps")) return 10;
+    if (!strcmp(name, "render_height")) return 120;
+    if (!strcmp(name, "render_distance")) return 128;
+    if (!strcmp(name, "autosave_seconds")) return 5;
+    return 1;
+}
+
+static void SettingsTab(void) {
+    static double snapshot[256]; static int haveSnap = 0;
+    UiPanel(20, 96, 1880, 960);
+    UiPanelTitle(20, 96, 1880, "Einstellungen");
+    UiText(44, 146, 20, COL_MUTED, "Änderungen gelten sofort und werden in game.conf gespeichert. Weitere Werte (Balancing, Karten ...) stehen in den .conf-Dateien.");
+    int n = 0;
+    for (int i = 0; i < cfgCount; i++) if (cfgDefs[i].ranged) n++;
+    double off = UiScrollBegin(&scSettings, 24, 180, 1872, 860, n * 56 + 80);
+    double y = 190 - off;
+    for (int i = 0; i < cfgCount; i++) {
+        CfgDef *d = &cfgDefs[i];
+        if (!d->ranged) continue;
+        char label[96]; snprintf(label, sizeof label, "%s", d->desc);
+        char *p = strstr(label, " ("); if (p) *p = 0;
+        double v = *d->val;
+        if (d->userMin == 0 && d->userMax == 1) {
+            int on = v != 0;
+            if (UiCheck(60, y + 2, label, &on)) *d->val = on;
+        } else {
+            UiNumField(6000 + i, 60, y, 520, 220, label, T_DBL, d->val, d->userMin, d->userMax, SettingStep(d->name));
+            UiTextf(1000, y + 8, 18, COL_MUTED, "erlaubt: %.10g bis %.10g", d->userMin, d->userMax);
+            if (v < d->userMin || v > d->userMax) UiText(1380, y + 8, 18, COL_BAD, "außerhalb des Bereichs (aus game.conf übernommen)");
+            if (!strcmp(d->name, "gamespeed") && v < 1) UiText(1380, y + 8, 18, COL_MUTED, "Zeitlupe");
+            if (!strcmp(d->name, "max_fps") && v <= 0) UiText(1380, y + 8, 18, COL_MUTED, "unbegrenzt");
+        }
+        if (!strcmp(d->name, "render_height")) UiText(1380, y + 8, 18, COL_MUTED, "wirkt nach Neustart");
+        y += 56;
+    }
+    UiScrollEnd();
+    /* Änderungen erkennen und game.conf schreiben */
+    int changed = !haveSnap;
+    for (int i = 0; i < cfgCount && i < 256; i++) { if (snapshot[i] != *cfgDefs[i].val) changed = 1; }
+    if (changed) {
+        if (haveSnap && !uiFocus) CfgSave(CONFIG_FILE);
+        if (!uiFocus) { for (int i = 0; i < cfgCount && i < 256; i++) snapshot[i] = *cfgDefs[i].val; haveSnap = 1; }
     }
 }
 
@@ -708,5 +785,6 @@ static void MenuScreen(void) {
     case TAB_CRAFT:  CraftingTab(); break;
     case TAB_SHOP:   ShopTab(); break;
     case TAB_MAPS:   MapsTab(); break;
+    case TAB_SETTINGS: SettingsTab(); break;
     }
 }

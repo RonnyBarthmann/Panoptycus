@@ -1,0 +1,258 @@
+# Panoptycus - maps.dat
+# Kapitel, Karten, Tempel und Ruinen. (Menschenlesbar; Kommentare mit #.)
+#
+# AUFBAU
+#   [map]      Ein Kartenlayout (Startpunkt, Monster, Wegpunkte). Jedes Kapitel besteht aus ALLEN hier
+#              definierten Karten in dieser Reihenfolge: gibt es 10 [map]-Abschnitte, hat jedes Kapitel 10 Karten.
+#              Die Koordinaten beziehen sich auf die Kartenkacheln aus maps.c (Pixel, y nach unten).
+#   [chapter]  Ein Kapitel. Die Karten eines Kapitels wachsen linear von level_first (erste Karte) bis
+#              level_last (letzte Karte) im Monster-Level. Anzahl Kapitel = Anzahl [chapter]-Abschnitte.
+#   [temple]   Tempel: zähe Gegner (Faktoren in game.conf: temple_*). Anzahl = Anzahl [temple]-Abschnitte.
+#   [ruins]    Ruinen: harte Gegner (game.conf: ruins_*).
+#
+# SCHLÜSSEL in [chapter]
+#   name         Name des Kapitels
+#   level_first  Monster-Level der ersten Karte (1 bis 100)
+#   level_last   Monster-Level der letzten Karte
+#   party        wie viele Helden gleichzeitig auf die Karten dürfen (1 oder 2)
+# SCHLÜSSEL in [temple] und [ruins]
+#   name, party  wie oben
+#   map          welche der [map]-Karten genutzt wird (1 = erste)
+#   level        Monster-Level
+#   after_chapter  freigeschaltet, sobald dieses Kapitel (Nummer, 1 = erstes) komplett geschafft ist
+# SCHLÜSSEL in [map]
+#   name         interner Name (nur zur Orientierung)
+#   start        x y winkel     Startpunkt der Helden und Blickrichtung (Grad)
+#   spawn        x y [rolle]    ein Monster; rolle: normal (Standard), miniboss, boss
+#   spawn_line   x1 y1 x2 y2 abstand [rolle]        Monster in gleichen Abständen entlang einer Linie
+#   spawn_grid   x1 y1 x2 y2 abstand_x abstand_y [rolle]   Monster-Raster
+#   waypoint     x y            Wegpunkt des Autopiloten (der Reihe nach abgelaufen)
+#   Das Level-Ende wird durch den Tod des Bosses ausgelöst: jede Karte braucht mindestens einen boss.
+
+[chapter]
+name = Grenzland
+level_first = 1
+level_last = 10
+party = 1
+
+[chapter]
+name = Dunkelwald
+level_first = 11
+level_last = 20
+party = 1
+
+[chapter]
+name = Sumpf der Vergessenen
+level_first = 21
+level_last = 30
+party = 1
+
+[chapter]
+name = Aschewüste
+level_first = 31
+level_last = 40
+party = 1
+
+[chapter]
+name = Frostgipfel
+level_first = 41
+level_last = 50
+party = 1
+
+[chapter]
+name = Kristallhöhlen
+level_first = 51
+level_last = 60
+party = 2
+
+[chapter]
+name = Verlorene Stadt
+level_first = 61
+level_last = 70
+party = 2
+
+[chapter]
+name = Vulkanschmiede
+level_first = 71
+level_last = 80
+party = 2
+
+[chapter]
+name = Schattenreich
+level_first = 81
+level_last = 90
+party = 2
+
+[chapter]
+name = Der Abgrund
+level_first = 91
+level_last = 100
+party = 2
+
+[temple]
+name = Tempel des Eisens
+map = 5
+level = 5
+party = 1
+after_chapter = 1
+
+[temple]
+name = Tempel des Feuers
+map = 5
+level = 25
+party = 1
+after_chapter = 3
+
+[temple]
+name = Tempel des Sturms
+map = 5
+level = 45
+party = 2
+after_chapter = 5
+
+[temple]
+name = Tempel der Schatten
+map = 5
+level = 65
+party = 2
+after_chapter = 7
+
+[temple]
+name = Tempel des Himmels
+map = 5
+level = 85
+party = 2
+after_chapter = 9
+
+[ruins]
+name = Ruinen I
+map = 5
+level = 10
+party = 1
+after_chapter = 2
+
+[ruins]
+name = Ruinen II
+map = 5
+level = 30
+party = 1
+after_chapter = 4
+
+[ruins]
+name = Ruinen III
+map = 5
+level = 50
+party = 2
+after_chapter = 6
+
+[ruins]
+name = Ruinen IV
+map = 5
+level = 70
+party = 2
+after_chapter = 8
+
+[ruins]
+name = Ruinen V
+map = 5
+level = 90
+party = 2
+after_chapter = 10
+
+# =====================================================================
+# Karten
+# =====================================================================
+
+[map]
+name = Karte 1
+start = 1020 6900 90
+spawn = 6800 4500 boss
+spawn = 4500 6000
+spawn = 4700 6000
+spawn = 4500 5200
+spawn = 4700 5200
+spawn = 5200 4200
+spawn = 5200 4500
+waypoint = 4600 6800
+waypoint = 4600 4500
+waypoint = 6800 4500
+
+[map]
+name = Karte 2 (Monster-Raster)
+start = 6150 7300 90
+spawn = 7500 5900 boss
+spawn_grid = 6000 5800 7500 7300 300 300
+waypoint = 7500 7300
+waypoint = 6100 6000
+waypoint = 7500 5900
+
+[map]
+name = Karte 3 (lange Monsterreihe)
+start = 2200 3000 90
+spawn = 7400 1950 boss
+spawn_line = 5200 3050 6700 3050 50
+waypoint = 2200 5300
+waypoint = 3500 5300
+waypoint = 3500 3100
+waypoint = 6700 3000
+waypoint = 6700 2000
+waypoint = 7400 1950
+
+[map]
+name = Karte 4 (Zickzack mit Zwischenboss)
+start = 1100 5500 90
+spawn = 5900 900 boss
+spawn = 5700 2000 miniboss
+spawn_grid = 2000 700 2400 1000 400 150
+spawn_grid = 4000 700 4500 1000 500 150
+spawn_grid = 2000 1850 2400 2150 400 150
+spawn_grid = 4000 1850 4500 2150 500 150
+waypoint = 1100 2000
+waypoint = 5700 2000
+waypoint = 1100 2000
+waypoint = 1100 900
+waypoint = 5900 900
+
+[map]
+name = Karte 5 (zweite Karten-Grafik)
+start = 16000 17500 90
+spawn = 11600 17400 boss
+spawn = 13500 13000 miniboss
+spawn = 15800 13000 miniboss
+waypoint = 16000 15500
+waypoint = 15836 15236
+waypoint = 15844 15272
+waypoint = 15804 13048
+waypoint = 15308 13016
+waypoint = 14852 13012
+waypoint = 14464 13024
+waypoint = 14328 13124
+waypoint = 13876 13120
+waypoint = 13452 12960
+waypoint = 13472 14400
+waypoint = 13464 15108
+waypoint = 13356 15416
+waypoint = 13356 15416
+waypoint = 13164 15488
+waypoint = 11944 15476
+waypoint = 11740 15532
+waypoint = 11608 15744
+waypoint = 11596 16824
+waypoint = 11600 17400
+# zusätzliche Gegner entlang des Weges
+spawn = 15844 13068
+spawn = 15764 13028
+spawn = 14892 13032
+spawn = 14812 12992
+spawn = 14368 13144
+spawn = 14288 13104
+spawn = 13492 12980
+spawn = 13412 12940
+spawn = 13504 15128
+spawn = 13424 15088
+spawn = 13396 15436
+spawn = 13316 15396
+spawn = 11984 15496
+spawn = 11904 15456
+spawn = 11648 15764
+spawn = 11568 15724

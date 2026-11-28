@@ -12,7 +12,7 @@ Bauen: `make` (benötigt SDL2, SDL2_image). Tests: `make -C tests` bzw. `tests/t
 - Kisten pro Kill (1/10 … 1/1M), Tragekapazität 10 + bis 60 durch Beutel/Brustrüstung
 - 14 Ausrüstungsplätze, Tränke (dauerhaft, laden sich bei Kills auf), Ringe, Amulette, Flügel
 - Handwerk, Item-Verbesserung (Stufe 0–21, 19→21 per Zufallssprung), Shop (nur Material)
-- 10 Kapitel à 5 Karten, dazu "Tempel" und "Ruinen" (jeweils auf der 5. Originalkarte)
+- Kapitel und Karten aus `maps.dat` (Standard: 10 Kapitel à 5 Karten), dazu "Tempel" und "Ruinen" (jeweils auf der 5. Originalkarte)
 - Ansichten: Vollbild pro Held, 2x2-Raster mit 4 speicherbaren Anordnungen
 - Balancing aus `Strength.ods` (Y3:AU27), logarithmisch
 
@@ -23,6 +23,18 @@ Bauen: `make` (benötigt SDL2, SDL2_image). Tests: `make -C tests` bzw. `tests/t
 - `1-3` Tränke, `q w e r` Skills, `a` Autopilot
 - Maus: Klick = laufen (halten = weiterlaufen), Klick auf Monster = angreifen
 - Debug (`PANOPTYCUS_DEBUGKEYS=uk`): `0` Neustart, `u` Spielerlevel, `k` Gold/Material, `l` Level
+
+## Konfiguration
+
+Alle Balancing-Werte liegen in lesbaren Textdateien neben dem Spiel (`#` = Kommentar, `key = wert`). Fehlerhafte Pflichtdateien werden beim Start als Liste gemeldet.
+
+- `game.conf` – Fenster, Bildrate, VSync, Spielgeschwindigkeit (auch <1 = Zeitlupe), Fortschritt, Monster-/Helden-Wachstum, XP, Gold, Tempel/Ruinen, Kisten, Shop. Fehlt die Datei, wird sie mit Standardwerten angelegt. Einstellungen mit `name_min`/`name_max` werden im Spiel auf diesen Bereich begrenzt; Werte außerhalb aus der Datei bleiben bis zur ersten Änderung in der Ansicht "Einstellungen" erhalten.
+- `strength.conf` – Rechenwerte für Waffen-/Rüstungsstärke.
+- `tiers.conf` – Stärke je Stufe (normal … legendär), welche Waffenlevel es je Stufe gibt, stufenabhängige Monstervariablen. Die Zahl der Stufen ist fest.
+- `monsters.conf` – Monstertypen.
+- `maps.dat` – Kartenvorlagen, Kapitel (Level erste/letzte Karte, linear skaliert), Tempel und Ruinen. Anzahl der Karten, Kapitel, Tempel und Ruinen ist frei wählbar. Achtung: Ändert sich die Kartenzahl, verschieben sich Karten-Indizes alter Spielstände.
+
+Bedienung: Zahlenfelder per Klick + Tippen; `+`/`-` und Mausrad ändern den Wert sofort. Namen von Helden sind im Spiel editierbar. Lange Listen haben Scrollbalken und Mausrad-Scrolling. Ansicht "Einstellungen" im Menü für Anzeige und Spielgeschwindigkeit; Änderung von `render_height` wirkt nach Neustart.
 
 ## Savegame-Editor
 

@@ -50,7 +50,7 @@ static int LoadSaveRaw(void) {
     FILE *f = fopen(SAVE_FILE, "rb");
     if (!f) return 0;
     SaveHeader h;
-    int ok = fread(&h, sizeof h, 1, f) == 1 && h.magic == SAVE_MAGIC && h.stageCount == StageCount &&
+    int ok = fread(&h, sizeof h, 1, f) == 1 && h.magic == SAVE_MAGIC &&
              h.heroSize == (int)sizeof heroes && h.playerSize == (int)sizeof player &&
              fread(&player, sizeof player, 1, f) == 1 && fread(heroes, sizeof heroes, 1, f) == 1;
     fclose(f);
@@ -75,10 +75,10 @@ static int LoadGame(void) {
 static void NewGame(void) {
     memset(&player, 0, sizeof player);
     for (int i = 0; i < MAX_HEROES; i++) { memset(&instances[i], 0, sizeof instances[i]); ClearHero(i); }
-    player.level = 1; player.gold = 150;
+    player.level = 1; player.gold = cfg.start_gold;
     for (int l = 0; l < LAYOUT_COUNT; l++) for (int c = 0; c < 4; c++) player.layouts[l][c] = -1;
     Item m;
-    for (int k = 0; k < MAT_COUNT; k++) { m = ItemMakeMaterial(TIER_NORMAL, k, 20); InvAdd(&m); }
+    for (int k = 0; k < MAT_COUNT; k++) { m = ItemMakeMaterial(TIER_NORMAL, k, (int)cfg.start_material); InvAdd(&m); }
     ShopRestock();
     int h = CreateHero(CLASS_Knight);
     StartStage(h, 0, -1);
@@ -108,35 +108,24 @@ static void SyncLayouts(void) {
 /* Einstellungen                                                      */
 /* ================================================================== */
 
-static void InitSettings(void) {
-    renderHeight = 1080;
-    MapRenderDistance = 1024;
-    FILE *f = fopen(CONFIG_FILE, "r");
-    if (!f) return;
-    struct { const char *key; int *target; } settings[] = {
-        { "renderHeight", &renderHeight }, { "renderDistance", &MapRenderDistance },
-    };
-    char line[256];
-    while (fgets(line, sizeof line, f)) {
-        char *p = line;
-        while (*p == ' ' || *p == '\t') p++;
-        for (size_t i = 0; i < sizeof settings / sizeof settings[0]; i++) {
-            size_t kl = strlen(settings[i].key);
-            if (strncmp(p, settings[i].key, kl) == 0) {
-                p += kl;
-                while (*p == ' ' || *p == '\t' || *p == '=') p++;
-                int v = 0;
-                if (sscanf(p, "%d", &v) == 1 && v > 0) *settings[i].target = v;
-                break;
-            }
-        }
-    }
-    fclose(f);
+/* Lädt alle Konfigurationsdateien. Rückgabe: Anzahl Fehler (0 = alles in Ordnung). */
+int GameLoadConfigs(void) {
+    CfgInit();
+    if (!CfgLoad(CONFIG_FILE)) CfgSave(CONFIG_FILE);          /* fehlt game.conf: mit Standardwerten anlegen */
+    int errors = LoadItemConfigs(".");
+    errors += LoadMonsterConf(".");
+    errors += LoadMapsDat(".");
+    return errors;
 }
 
-/* ================================================================== */
-/* Hauptschleife                                                      */
-/* ================================================================== */
+static void ApplyDisplaySettings(int force) {
+    static int lastVsync = -1, lastFull = -1, lastFps = -1;
+    int vs = cfg.vsync != 0, fu = cfg.fullscreen != 0, fp = (int)cfg.max_fps;
+    if (force || vs != lastVsync) { SetVSync(vs); lastVsync = vs; }
+    if (force || fu != lastFull)  { if (!(force && !fu)) SetFullscreen(fu); lastFull = fu; }
+    if (force || fp != lastFps)   { SetFrameLimit(fp); lastFps = fp; }
+    MapRenderDistance = (int)cfg.render_distance;
+}
 
 static void HandleKey(int key, int *quit) {
     if (key == 0) return;
@@ -173,6 +162,8 @@ static void HandleKey(int key, int *quit) {
 #endif
 }
 
+void GameWindowSize(int *w, int *h) { *w = (int)cfg.window_width; *h = (int)cfg.window_height; }
+
 static int editorMode = 0;
 void GameSetEditor(int on) { editorMode = on; }
 
@@ -181,9 +172,9 @@ void GameSetEditor(int on) { editorMode = on; }
 void GameMain(void) {
     engineStep = 0;
     InitMapTiles();
-    InitTemplates();
-    BuildStages();
-    InitSettings();
+    renderHeight = (int)cfg.render_height;
+    if (renderHeight < 200) renderHeight = 200;
+    ApplyDisplaySettings(1);
     renderWidth = renderHeight * 16 / 9;
     scale = (double)renderHeight / 1080.0;
 
@@ -201,7 +192,9 @@ void GameMain(void) {
     activeHero = FirstHero();
     selHero = activeHero;
     screen = SCR_GRID;
-    int saveTimer = 0, quit = 0;
+    int quit = 0;
+    double simAcc = 0;
+    time_t lastSave = time(NULL);
 
     /* Test-Hooks (Umgebungsvariablen) */
     if (getenv("PANOPTYCUS_SIM")) {                       /* nur simulieren, dann Statistik ausgeben */
@@ -253,12 +246,19 @@ void GameMain(void) {
         uiClickUsed = 0;
         uiTipItem = NULL;
         int key = GetKey();
+        UiFrameInput(&key);
         HandleKey(key, &quit);
 
         /* ---- Simulation ---- */
-        SimStep();
-        if (++player.shopTimer >= 36000) ShopRestock();
-        if (++saveTimer >= 60 * 30) { SaveGame(); saveTimer = 0; }
+        ApplyDisplaySettings(0);
+        double gs = cfg.gamespeed; if (gs < 0) gs = 0; if (gs > 16) gs = 16;
+        simAcc += gs;
+        for (int st = 0; simAcc >= 1.0 && st < 16; st++, simAcc -= 1.0) {
+            SimStep();
+            if (++player.shopTimer >= RestockFrames()) ShopRestock();
+        }
+        if (simAcc > 2.0) simAcc = 2.0;
+        if (time(NULL) - lastSave >= (time_t)cfg.autosave_seconds) { SaveGame(); lastSave = time(NULL); }
         SyncLayouts();
         if (!heroes[activeHero].isHero) activeHero = FirstHero();
 

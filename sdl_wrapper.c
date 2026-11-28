@@ -428,9 +428,31 @@ static int ButtonToIndex(Uint8 sdlButton)
     }
 }
 
+static int frameLimit = 0;
+static Uint64 lastFrameTicks = 0;
+
+void SetVSync(int on)   { if (renderer) SDL_RenderSetVSync(renderer, on ? 1 : 0); }
+void SetFullscreen(int on) { if (window) SDL_SetWindowFullscreen(window, on ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0); }
+void SetFrameLimit(int fps) { frameLimit = fps > 0 ? fps : 0; }
+void SetClipRect(int x, int y, int w, int h) { SDL_Rect r = { x, y, w < 0 ? 0 : w, h < 0 ? 0 : h }; if (renderer) SDL_RenderSetClipRect(renderer, &r); }
+void ClearClipRect(void) { if (renderer) SDL_RenderSetClipRect(renderer, NULL); }
+
 void FlipBuffers(void)
 {
     SDL_RenderPresent(renderer);
+
+    /* Bildratenbegrenzung */
+    if (frameLimit > 0) {
+        Uint64 freq = SDL_GetPerformanceFrequency();
+        Uint64 target = freq / (Uint64)frameLimit;
+        Uint64 now = SDL_GetPerformanceCounter();
+        if (lastFrameTicks && now - lastFrameTicks < target) {
+            double ms = (double)(target - (now - lastFrameTicks)) * 1000.0 / (double)freq;
+            if (ms > 2.0) SDL_Delay((Uint32)(ms - 1.0));
+            while (SDL_GetPerformanceCounter() - lastFrameTicks < target) { /* kurz aktiv warten */ }
+        }
+        lastFrameTicks = SDL_GetPerformanceCounter();
+    } else lastFrameTicks = 0;
 
     /* Eingabezustand für den neuen Frame zurücksetzen (buttonIsDown
      * bleibt bestehen, da es den "gehalten"-Zustand fortlaufend
