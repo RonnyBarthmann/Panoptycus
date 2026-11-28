@@ -591,7 +591,7 @@ double MonsterBaseHP(int l)     { return 6.0 * PowerCurve(l); }
 double MonsterBaseAttack(int l) { return 0.5 * PowerCurve(l); }
 double MonsterArmorK(int l)     { return 4.0 * PowerCurve(l); }
 double GoldPerKill(int l)       { return 0.6 * PowerCurve(l); }
-double XpNeeded(int l)          { return 100.0 * pow(10.0, 0.05 * l); }
+double XpNeeded(int l)          { double q = l / 100.0; return 100.0 * pow(10.0, 0.05 * l + 3.3 * q * q); }   /* ab Level ~99 mehr als 1000x so viel */
 double XpForKill(int l)         { return 4.0 * pow(10.0, 0.05 * l); }
 double PlayerXpNeeded(int l)    { return 300.0 * pow(10.0, 0.05 * l); }
 

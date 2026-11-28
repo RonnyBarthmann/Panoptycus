@@ -1122,6 +1122,17 @@ static void HeroAISkills(int h, int tgt, double tgtDist) {
 static void HeroPatrol(int h) {
     Hero *H = &heroes[h];
     const Template *T = &Templates[Stages[H->stage].tmpl];
+    if (H->wpResync) {                                 /* nach manueller Steuerung: nächsten (sichtbaren) Wegpunkt wählen */
+        int best = -1, bestAny = -1; double bd = BIGFLOAT, bda = BIGFLOAT;
+        for (int i = 0; i < T->nWay; i++) {
+            double d = Dist(H->x, H->y, T->way[i].x, T->way[i].y);
+            if (d < bda) { bda = d; bestAny = i; }
+            if (d < bd && HasLineOfSight(H->x, H->y, T->way[i].x, T->way[i].y)) { bd = d; best = i; }
+        }
+        if (best < 0) best = bestAny;
+        if (best >= 0) H->waypoint = best;
+        H->wpResync = 0;
+    }
     if (H->waypoint < T->nWay) {
         double wx = T->way[H->waypoint].x, wy = T->way[H->waypoint].y;
         if (Dist(H->x, H->y, wx, wy) < HeroMoveSpeed(h) * 1.1 + 12) { H->waypoint++; return; }
@@ -1133,8 +1144,18 @@ static void HeroPatrol(int h) {
     int m = HeroNearestMonster(h, BIGFLOAT, NULL);
     if (m >= 0) {
         Monster *mo = &instances[H->inst].mon[m];
-        H->walking = HeroStepTo(h, mo->x, mo->y);
-        if (H->walking) H->angle = LookAt(H->x, H->y, mo->x, mo->y);
+        double tx = mo->x, ty = mo->y;
+        if (!HasLineOfSight(H->x, H->y, mo->x, mo->y)) {  /* Wand dazwischen: über den Wegpunkt gehen, der dem Gegner am nächsten und frei erreichbar ist */
+            double bd = BIGFLOAT;
+            for (int i = 0; i < T->nWay; i++) {
+                double wx = T->way[i].x, wy = T->way[i].y;
+                if (Dist(H->x, H->y, wx, wy) < 40 || !HasLineOfSight(H->x, H->y, wx, wy)) continue;
+                double d = Dist(wx, wy, mo->x, mo->y);
+                if (d < bd) { bd = d; tx = wx; ty = wy; }
+            }
+        }
+        H->walking = HeroStepTo(h, tx, ty);
+        if (H->walking) H->angle = LookAt(H->x, H->y, tx, ty);
     }
 }
 
@@ -1193,6 +1214,7 @@ static void HeroAI(int h) {
 static void HeroManual(int h) {
     Hero *H = &heroes[h];
     H->walking = 0;
+    H->wpResync = 1;
     if (H->focus >= 0 && instances[H->inst].mon[H->focus].alive) {
         Monster *m = &instances[H->inst].mon[H->focus];
         double range = ClassAttackRange(H->class);
@@ -1227,7 +1249,7 @@ static void HeroUpdate(int h) {
     /* Festhänge-Erkennung (nur Autopilot): lange kaum bewegt, obwohl Laufen gewollt */
     if (H->autopilotEnabled && H->manualTimer <= 0) {
         if (++H->stuckT >= 150) {
-            if (Dist(H->x, H->y, H->stuckX, H->stuckY) < 30 && H->walking && !H->attacking) {
+            if (Dist(H->x, H->y, H->stuckX, H->stuckY) < 30 && !H->attacking && CountMonstersNear(h, 150) == 0) {
                 H->waypoint++; H->ignoreT = 240; H->focus = -1;
             }
             H->stuckX = H->x; H->stuckY = H->y; H->stuckT = 0;
@@ -1293,13 +1315,14 @@ static int SellItem(int invIdx) {
 
 static double MaterialBuyPrice(int tier, int kind) {
     Item m = ItemMakeMaterial(tier, kind, 1);
-    return ItemSellValue(&m) * 4.0 + 1;
+    return ItemSellValue(&m) * 40.0 * pow(2.0, tier) + 5;
 }
-static int ShopTierUnlocked(int tier) { return tier <= (player.level >= 60 ? TIER_BOSS : (player.level >= 40 ? TIER_UNIQUE : (player.level >= 20 ? TIER_RARE : (player.level >= 8 ? TIER_MAGIC : TIER_NORMAL)))); }
+static int ShopTierUnlocked(int tier) { return tier <= (player.level >= 100 ? TIER_LEGENDARY : player.level >= 60 ? TIER_BOSS : (player.level >= 40 ? TIER_UNIQUE : (player.level >= 20 ? TIER_RARE : (player.level >= 8 ? TIER_MAGIC : TIER_NORMAL)))); }
 
 static void ShopRestock(void) {
-    static const int base[TIER_COUNT] = { 40, 10, 5, 2, 0, 0 };
-    static const int var[TIER_COUNT]  = { 40, 10, 5, 3, 2, 0 };
+    static const int base[TIER_COUNT] = { 30, 6, 3, 1, 0, 0 };
+    static const int var[TIER_COUNT]  = { 20, 5, 3, 2, 2, 2 };
+    player.shopTimer = 0;
     for (int t = 0; t < TIER_COUNT; t++)
         for (int k = 0; k < MAT_COUNT; k++)
             player.shopStock[t][k] = base[t] + Rnd(var[t] > 0 ? var[t] : 1);

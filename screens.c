@@ -26,12 +26,6 @@ static const char *EQ_NAMES[EQ_COUNT] = {
     "Halskette", "Ring", "Ring", "Trank 1", "Trank 2", "Trank 3", "Flügel"
 };
 
-static int BestUnlockedStoryStage(void) {
-    int best = 0;
-    for (int s = 0; s < StageCount; s++) if (Stages[s].kind == STAGE_STORY && StageUnlocked(s)) best = s;
-    return best;
-}
-
 static int NextHeroAfter(int h, int dir) {
     for (int i = 1; i <= MAX_HEROES; i++) {
         int k = ((h + dir * i) % MAX_HEROES + MAX_HEROES) % MAX_HEROES;
@@ -140,6 +134,8 @@ static const double CELL_Y[4] = { 130, 130, 550, 550 };
 #define CELL_W 712
 #define CELL_H 400
 
+static int swapCell = -1;     /* Feld, für das gerade ein Held gewählt wird */
+
 static void GridScreen(int *heroCanvas, int canvas) {
     int *lay = player.layouts[player.activeLayout];
     for (int c = 0; c < 4; c++) {
@@ -158,28 +154,45 @@ static void GridScreen(int *heroCanvas, int canvas) {
         if (h < 0 || !heroes[h].isHero) UiTextC(x + CELL_W / 2, y + CELL_H / 2 - 16, 32, 0xFFE9CC, "Leer - Held wählen");
         int inCell = UiHover(x, y, CELL_W, CELL_H);
         /* Wechsel- und Einsammeln-Knöpfe */
-        if (UiButtonEx(x + CELL_W - 128, y + 6, 122, 34, "Wechseln", 1, COL_PARCH_D)) {
-            int next = -1;
-            for (int i = 1; i <= MAX_HEROES + 1 && next < -1 + 1; i++) {      /* nächster Held, der hier nicht schon gezeigt wird */
-                int k = ((h < 0 ? -1 : h) + i) % MAX_HEROES;
-                if (!heroes[k].isHero) continue;
-                int used = 0; for (int q = 0; q < 4; q++) if (q != c && lay[q] == k) used = 1;
-                if (!used) { next = k; break; }
-            }
-            lay[c] = next;
-        }
+        int en = swapCell < 0;
+        if (UiButtonEx(x + CELL_W - 128, y + 6, 122, 34, "Wechseln", en, COL_PARCH_D)) swapCell = c;
         if (h >= 0 && heroes[h].isHero) {
             int tot = HeroChestTotal(h);
-            if (UiButtonEx(x + 190, y + 6, 160, 34, "Einsammeln", tot > 0, tot > 0 ? 0xFFD34D : COL_PARCH_D)) { int n; CollectChests(h, &n); Toast("%s: Kisten eingesammelt", heroes[h].name); }
-            if (inCell && uiClick && !uiClickUsed) { activeHero = h; screen = SCR_HERO; uiClickUsed = 1; }
+            if (UiButtonEx(x + CELL_W - 166, y + 46, 160, 34, "Einsammeln", en && tot > 0, tot > 0 ? 0xFFD34D : COL_PARCH_D)) { int n; CollectChests(h, &n); Toast("%s: Kisten eingesammelt", heroes[h].name); }
+            if (en && inCell && uiClick && !uiClickUsed) { activeHero = h; screen = SCR_HERO; uiClickUsed = 1; }
         }
     }
     /* Layout-Reiter unter dem Raster */
     for (int l = 0; l < LAYOUT_COUNT; l++) {
         char b[32]; snprintf(b, sizeof b, "Anordnung %d", l + 1);
-        if (UiButtonEx(238 + l * 190, 975, 176, 46, b, 1, l == player.activeLayout ? 0xFFE9CC : COL_PARCH_D)) player.activeLayout = l;
+        if (UiButtonEx(238 + l * 190, 975, 176, 46, b, swapCell < 0, l == player.activeLayout ? 0xFFE9CC : COL_PARCH_D)) player.activeLayout = l;
     }
     UiText(1010, 984, 22, COL_INK, "Klick auf ein Fenster = Vollbild");
+    /* Heldenwahl für ein Feld */
+    if (swapCell >= 0) {
+        int cur = lay[swapCell];
+        UiFillA(0, 78, 1920, 1002, 0x000000, 150);
+        UiPanel(520, 150, 880, 760);
+        UiPanelTitle(520, 150, 880, "Held für dieses Feld wählen");
+        int row = 0;
+        for (int k = 0; k < MAX_HEROES; k++) {
+            if (!heroes[k].isHero) continue;
+            double bx = 544 + (row % 2) * 420, by = 210 + (row / 2) * 58;
+            char lab[64]; int shownAt = -1;
+            for (int q = 0; q < 4; q++) if (lay[q] == k && q != swapCell) shownAt = q;
+            if (shownAt >= 0) snprintf(lab, sizeof lab, "%s Lv %d (Feld %d)", heroes[k].name, heroes[k].level, shownAt + 1);
+            else snprintf(lab, sizeof lab, "%s Lv %d", heroes[k].name, heroes[k].level);
+            UiFill(bx - 6, by, 6, 50, CLASS_COLORS[heroes[k].class]);
+            if (UiButtonEx(bx, by, 394, 50, lab, 1, k == cur ? 0xFFE9CC : COL_PARCH_D)) {
+                if (shownAt >= 0) lay[shownAt] = cur;           /* Held war schon woanders: tauschen */
+                lay[swapCell] = k; swapCell = -1;
+                break;
+            }
+            row++;
+        }
+        if (swapCell >= 0 && UiButtonEx(544, 800, 394, 56, "Feld leeren", 1, 0xE8B0A8)) { lay[swapCell] = -1; swapCell = -1; }
+        if (swapCell >= 0 && UiButton(964, 800, 394, 56, "Abbrechen")) swapCell = -1;
+    }
 }
 
 /* ================================================================== */
@@ -232,7 +245,7 @@ static void ClassPickDialog(void) {
         if (UiHover(x, y, 270, 230) && uiClick && !uiClickUsed) {
             uiClickUsed = 1;
             int h = CreateHero(c);
-            if (h >= 0) { StartStage(h, BestUnlockedStoryStage(), -1); selHero = h; Toast("%s erstellt", heroes[h].name); }
+            if (h >= 0) { StartStage(h, 0, -1); selHero = h; Toast("%s erstellt", heroes[h].name); }
             else Toast("Kein freier Heldenplatz");
             pickClass = 0;
         }
@@ -276,10 +289,12 @@ static void HeroesTab(void) {
     if (UiButtonEx(1456, 108, 200, 46, H->autopilotEnabled ? "Autopilot: AN" : "Autopilot: AUS", 1, H->autopilotEnabled ? 0xBFE3A8 : 0xE8B0A8)) { H->autopilotEnabled = !H->autopilotEnabled; H->manualTimer = 0; }
     if (UiButton(1672, 108, 214, 46, "Karte wählen")) { screen = SCR_MENU; menuTab = TAB_MAPS; mapHeroA = selHero; }
     if (UiButton(1240, 166, 200, 46, H->autoNext ? "Auto-Weiter: AN" : "Auto-Weiter: AUS")) H->autoNext = !H->autoNext;
-    if (UiButtonEx(1456, 166, 200, 46, confirmDismiss ? "Wirklich?" : "Entlassen", HeroCount() > 1, confirmDismiss ? 0xE8B0A8 : COL_PARCH_D)) {
+    int equipEmpty = 1;
+    for (int s = 0; s < EQ_COUNT; s++) if (!ItemIsEmpty(&H->equip[s])) equipEmpty = 0;
+    if (!equipEmpty) { confirmDismiss = 0; UiText(590, 208, 16, COL_MUTED, "Entlassen nur mit leerer Ausrüstung (alles ablegen)"); }
+    if (UiButtonEx(1456, 166, 200, 46, confirmDismiss ? "Wirklich?" : "Entlassen", HeroCount() > 1 && equipEmpty, confirmDismiss ? 0xE8B0A8 : COL_PARCH_D)) {
         if (!confirmDismiss) confirmDismiss = 1;
         else {
-            for (int s = 0; s < EQ_COUNT; s++) { HeroUnequip(selHero, s); }
             LeaveInstance(selHero); ClearHero(selHero);
             for (int l = 0; l < LAYOUT_COUNT; l++) for (int c = 0; c < 4; c++) if (player.layouts[l][c] == selHero) player.layouts[l][c] = -1;
             selHero = FirstHero(); confirmDismiss = 0; return;
@@ -551,7 +566,6 @@ static void CraftingTab(void) {
 /* Shop-Tab                                                           */
 /* ================================================================== */
 
-static int shopTimer = 0;
 
 static void ShopTab(void) {
     UiPanel(20, 96, 1000, 960);
@@ -601,8 +615,8 @@ static void ShopTab(void) {
         Toast("%d Gegenstände verkauft", count);
     }
     UiText(1060, 420, 22, COL_INK, "Verkauf einzelner Dinge: Inventar => Verkaufen");
-    if (UiButtonEx(1060, 480, 400, 56, "Vorrat auffüllen (nächster in 10 min)", 1, COL_PARCH_D)) { ShopRestock(); shopTimer = 0; Toast("Vorrat aufgefüllt"); }
-    UiTextf(1060, 560, 20, COL_MUTED, "Nächster Nachschub in %d s", (36000 - shopTimer) / 60);
+    UiTextf(1060, 480, 24, COL_INK, "Nächster Nachschub in %d:%02d", (36000 - player.shopTimer) / 3600, ((36000 - player.shopTimer) / 60) % 60);
+    UiText(1060, 516, 18, COL_MUTED, "Der Vorrat füllt sich alle 10 Minuten von selbst auf.");
 }
 
 /* ================================================================== */

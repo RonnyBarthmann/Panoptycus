@@ -164,7 +164,7 @@ static StageDef Stages[MAX_STAGES];
 static int      StageCount = 0;
 
 #define STORY_CHAPTERS 10
-#define STORY_MAPS_PER_CHAPTER 4
+#define STORY_MAPS_PER_CHAPTER 5
 #define TEMPLE_COUNT 5
 #define RUINS_COUNT 5
 
@@ -184,7 +184,7 @@ static void BuildStages(void) {
             memset(s, 0, sizeof *s);
             s->kind = STAGE_STORY; s->chapter = c; s->index = m;
             s->level = 1 + idx * 99 / (STORY_CHAPTERS * STORY_MAPS_PER_CHAPTER - 1);
-            s->tmpl = (m == 3 && (c & 1)) ? 4 : m;
+            s->tmpl = m;                              /* die 5 Original-Karten pro Kapitel */
             s->partyMax = (c >= 5) ? 2 : 1;           /* mehrere Helden erst in späteren Kapiteln */
             s->hpMul = (s->partyMax > 1) ? 1.6 : 1.0;
             s->atkMul = 1.0; s->xpMul = 1.0;
@@ -197,10 +197,10 @@ static void BuildStages(void) {
         StageDef *s = &Stages[StageCount];
         memset(s, 0, sizeof *s);
         s->kind = STAGE_TEMPLE; s->chapter = k; s->index = 0;
-        s->level = 5 + 20 * k; s->tmpl = 2;
+        s->level = 5 + 20 * k; s->tmpl = 4;      /* nur die 5. Original-Karte */
         s->partyMax = (k >= 2) ? 2 : 1;
         s->hpMul = 6.0 * (s->partyMax > 1 ? 1.6 : 1.0); s->atkMul = 0.5; s->xpMul = 1.6;
-        s->req = k * 8 + 3;                              /* Kapitel 1,3,5,7,9 abgeschlossen */
+        s->req = k * 10 + 4;                             /* Kapitel 1,3,5,7,9 abgeschlossen */
         snprintf(s->name, sizeof s->name, "%s", TEMPLE_NAMES[k]);
         StageCount++;
     }
@@ -208,10 +208,10 @@ static void BuildStages(void) {
         StageDef *s = &Stages[StageCount];
         memset(s, 0, sizeof *s);
         s->kind = STAGE_RUINS; s->chapter = k; s->index = 0;
-        s->level = 10 + 20 * k; s->tmpl = 1;
+        s->level = 10 + 20 * k; s->tmpl = 4;     /* nur die 5. Original-Karte */
         s->partyMax = (k >= 2) ? 2 : 1;
         s->hpMul = 0.6 * (s->partyMax > 1 ? 1.6 : 1.0); s->atkMul = 5.0; s->xpMul = 1.6;
-        s->req = k * 8 + 7;                              /* Kapitel 2,4,6,8,10 abgeschlossen */
+        s->req = k * 10 + 9;                             /* Kapitel 2,4,6,8,10 abgeschlossen */
         snprintf(s->name, sizeof s->name, "%s", RUINS_NAMES[k]);
         StageCount++;
     }
