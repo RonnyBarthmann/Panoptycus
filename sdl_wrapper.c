@@ -407,6 +407,7 @@ static int TranslateKey(SDL_Keycode sym, Uint16 mod)
 {
     if (sym == SDLK_RETURN || sym == SDLK_KP_ENTER) return 10;
     if (sym == SDLK_ESCAPE) return 27;
+    if (sym == SDLK_BACKSPACE) return 8;
 
     /* druckbare Zeichen kommen normalerweise über SDL_TEXTINPUT rein,
      * hier fangen wir nur die o.g. Sonderfälle ab. */

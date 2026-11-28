@@ -24,6 +24,15 @@ Bauen: `make` (benötigt SDL2, SDL2_image). Tests: `make -C tests` bzw. `tests/t
 - Maus: Klick = laufen (halten = weiterlaufen), Klick auf Monster = angreifen
 - Debug (`PANOPTYCUS_DEBUGKEYS=uk`): `0` Neustart, `u` Spielerlevel, `k` Gold/Material, `l` Level
 
+## Savegame-Editor
+
+Start mit `./game --editor`. Der Editor bearbeitet `savegame.dat` (vor dem ersten Speichern entsteht `savegame.dat.bak`). Das Spiel sollte dabei nicht laufen, es überschreibt den Spielstand regelmäßig.
+
+- **Helden:** alle 16 Heldenplätze mit ihrer Ausrüstung. Klick auf das Klassensymbol öffnet die Held-Daten (Level, EP, Name, Karte, Kisten, Skills, ...).
+- **Spieler:** das Inventar mit 168 Slots. Das Symbol "Spieler-Daten" öffnet Gold, Level, EP, Anordnungen, geschaffte Karten, Shop-Vorrat und Timer.
+- **Editor-Slot** (rechts): Kategorie, Stufe, Art, Nummer, Item-Level bzw. Anzahl einstellen. Linke Maustaste halten und über Slots fahren setzt das Item in jeden Slot, der es annimmt (Helm nur in Helm-Slots). Rechtsklick auf einen Slot kopiert ihn in den Editor-Slot.
+- Zahlenfelder: anklicken, tippen, Enter. `-`/`+` ändern um 1.
+
 Spielstand: `savegame.dat` (wird automatisch geschrieben).
 
 ---------------------------------------------------------------

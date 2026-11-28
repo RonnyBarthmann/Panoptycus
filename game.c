@@ -45,7 +45,8 @@ static void SaveGame(void) {
     fclose(f);
 }
 
-static int LoadGame(void) {
+/* liest nur die Rohdaten (player, heroes); 0 bei fehlender/unpassender Datei */
+static int LoadSaveRaw(void) {
     FILE *f = fopen(SAVE_FILE, "rb");
     if (!f) return 0;
     SaveHeader h;
@@ -53,7 +54,11 @@ static int LoadGame(void) {
              h.heroSize == (int)sizeof heroes && h.playerSize == (int)sizeof player &&
              fread(&player, sizeof player, 1, f) == 1 && fread(heroes, sizeof heroes, 1, f) == 1;
     fclose(f);
-    if (!ok) return 0;
+    return ok;
+}
+
+static int LoadGame(void) {
+    if (!LoadSaveRaw()) return 0;
     int stageOf[MAX_HEROES], partnerOf[MAX_HEROES];
     for (int i = 0; i < MAX_HEROES; i++) { stageOf[i] = heroes[i].stage; partnerOf[i] = heroes[i].partner; heroes[i].inst = -1; heroes[i].stage = -1; heroes[i].partner = -1; }
     for (int i = 0; i < MAX_HEROES; i++) {
@@ -168,6 +173,11 @@ static void HandleKey(int key, int *quit) {
 #endif
 }
 
+static int editorMode = 0;
+void GameSetEditor(int on) { editorMode = on; }
+
+#include "editor.c"
+
 void GameMain(void) {
     engineStep = 0;
     InitMapTiles();
@@ -184,6 +194,7 @@ void GameMain(void) {
     if (LoadTextures() == 0) return;
 
     srand((unsigned)time(NULL));
+    if (editorMode) { EditorMain(Canvas); return; }
     if (!LoadGame()) NewGame();
     if (HeroCount() == 0) NewGame();
     SyncLayouts();
